@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  api:
+    image: python:3.12
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: >
+      sh -c "pip install -r requirements.txt &&
+             uvicorn api.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+
+  worker:
+    image: python:3.12
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: >
+      sh -c "pip install -r requirements.txt &&
+             python worker/fetch_positions.py"
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7
