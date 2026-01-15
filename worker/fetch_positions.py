@@ -50,17 +50,17 @@ async def main():
             "positions": latest_positions
           }
 
-        await redis_client.set(
-          "openf1:active_session_positions",
-          json.dumps(payload),
-          ex=30
-        )
-        print(
-            f"Positions updated | session={current_session['session_key']}",
-            flush=True
-        )
+          await redis_client.set(
+            "openf1:active_session_positions",
+            json.dumps(payload),
+            ex=30
+          )
+          print(
+              f"Positions updated | session={current_session['session_key']}",
+              flush=True
+          )
 
-        sleep_time = ACTIVE_SESSION_DELAY
+          sleep_time = ACTIVE_SESSION_DELAY
       except Exception as e:
         print(f"Worker error: {e}", flush=True)
         sleep_time = ERROR_DELAY
