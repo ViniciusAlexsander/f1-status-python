@@ -1,6 +1,4 @@
-from turtle import pos
 import httpx
-from datetime import datetime
 
 OPENF1_API_URL = "https://api.openf1.org/v1"
 

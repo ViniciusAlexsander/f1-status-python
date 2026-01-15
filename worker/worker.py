@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 import json
 import redis.asyncio as redis
+import os
 
 from openf1_client import get_active_sessions, get_current_meeting, get_positions
 
@@ -9,9 +10,14 @@ ACTIVE_SESSION_DELAY = 10        # 10s
 NO_SESSION_DELAY = 60 * 60       # 1h
 ERROR_DELAY = 30                 # 30s em erro
 
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+
 async def main():
     print(f"Starting fetch positions worker: {datetime.now(timezone.utc).isoformat()}")
-    redis_client = redis.from_url("redis://redis:6379")
+    redis_client = redis.from_url(
+        REDIS_URL,
+        decode_responses=True
+    )
 
     while True:
       sleep_time = ERROR_DELAY
