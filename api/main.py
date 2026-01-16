@@ -2,6 +2,8 @@ import os
 import json
 import redis.asyncio as redis
 from fastapi import FastAPI
+from strawberry.fastapi import GraphQLRouter
+from schema.schema import schema
 import uvicorn
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
@@ -9,10 +11,11 @@ PORT = int(os.getenv("PORT", 8000))
 
 app = FastAPI()
 
-redis_client = redis.from_url(
-    REDIS_URL,
-    decode_responses=True
-)
+redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+
+graphql_app = GraphQLRouter(schema)
+
+app.include_router(graphql_app, prefix="/graphql")
 
 @app.get("/positions")
 async def get_positions():
@@ -25,15 +28,16 @@ async def get_positions():
             return {
                 "status": "NO_ACTIVE_SESSION",
                 "updated_at": None,
-                "message": "No active F1 session at the moment"
+                "message": "No active F1 session at the moment",
             }
     except Exception as e:
         # Redis não acessível
         return {
             "status": "ERROR",
             "updated_at": None,
-            "message": f"Redis not available: {e}"
+            "message": f"Redis not available: {e}",
         }
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=PORT)

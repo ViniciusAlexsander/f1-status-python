@@ -1,0 +1,27 @@
+{
+  // Formatação Python
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    }
+  },
+  
+  // Configurações gerais do editor
+  "editor.rulers": [88, 100],
+  "editor.tabSize": 4,
+  "editor.insertSpaces": true,
+  
+  // Configurações do Python
+  "python.formatting.provider": "none",
+  "python.linting.enabled": true,
+  "python.linting.pylintEnabled": false,
+  "python.linting.flake8Enabled": false,
+  
+  // Black formatter settings
+  "black-formatter.args": [
+    "--line-length=88"
+  ]
+}
+
