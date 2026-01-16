@@ -11,7 +11,7 @@ from .types import Meeting
 @strawberry.type
 class Query:
     @strawberry.field
-    async def all_meetings(self) -> List[Meeting]:
+    async def current_year_meetings(self) -> List[Meeting]:
         current_year = datetime.now().year
         current_year_meetings = await get_meetings(current_year)
         return [
@@ -34,7 +34,7 @@ class Query:
         ]
 
     @strawberry.field
-    async def next_meeting(self) -> Meeting:
+    async def current_year_next_meeting(self) -> Meeting:
         current_year = datetime.now().year
         current_year_meetings = await get_meetings(current_year)
         next_meeting = current_year_meetings[0]
