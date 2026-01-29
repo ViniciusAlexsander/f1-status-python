@@ -5,11 +5,24 @@ from fastapi import FastAPI
 from strawberry.fastapi import GraphQLRouter
 from schema.schema import schema
 import uvicorn
+from fastapi.middleware.cors import CORSMiddleware
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 PORT = int(os.getenv("PORT", 8000))
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "https://f1-status-frontend-production.up.railway.app",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 
