@@ -1,40 +1,14 @@
-TODO
+# F1 Status API
 
-- [ ] Endpoint com as datas das próximas corridas
-- [ ] Websocket de position
-- [ ] Passear com o cachorro
+API REST em FastAPI para consultar eventos de Fórmula 1 usando a OC Blacktop API.
 
+## Rodando localmente
 
-query {
-  currentYearNextMeeting {
-    meetingKey
-    meetingName
-    meetingOfficialName
-    location
-    countryName
-    countryFlag
-    circuitShortName
-    circuitType
-    circuitImage
-    gmtOffset
-    dateStart
-    dateEnd
-    year
-  }
-  currentYearMeetings{
-    meetingKey
-    meetingName
-    meetingOfficialName
-    location
-    countryName
-    countryFlag
-    circuitShortName
-    circuitType
-    circuitImage
-    gmtOffset
-    dateStart
-    dateEnd
-    year
-  }
-}
+Crie um arquivo `.env` na raiz:
 
+```env
+OCBLACKTOP_API_KEY=sua_chave_aqui
+OCBLACKTOP_API_BASE_URL=https://api.ocblacktop.com/v1
+CORS_ALLOW_ORIGINS=http://localhost:5173
+PORT=8000
+```
