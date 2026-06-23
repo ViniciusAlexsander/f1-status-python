@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from dependencies import get_formula1_events_service
 from domain.ocblacktop_client import (
@@ -34,5 +34,9 @@ async def list_formula1_events(
     except OcblacktopClientError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="External API request failed",
+            detail=(
+                f"External API request failed with status {exc.status_code}"
+                if exc.status_code
+                else "External API request failed"
+            ),
         ) from exc

@@ -12,3 +12,8 @@ OCBLACKTOP_API_BASE_URL=https://api.ocblacktop.com/v1
 CORS_ALLOW_ORIGINS=http://localhost:5173
 PORT=8000
 ```
+
+Com Docker Compose, esse `.env` tambem e carregado pelo servico `api`.
+Em deploys fora do Compose, configure `OCBLACKTOP_API_KEY` nas variaveis de
+ambiente da plataforma; definir apenas `PORT` nao e suficiente para iniciar a
+API.

@@ -1,10 +1,18 @@
+import logging
+from json import JSONDecodeError
+
 import httpx
 from pydantic import ValidationError
 
 from schemas.formula1_events import Formula1EventsResponse
 
+logger = logging.getLogger(__name__)
+
+
 class OcblacktopClientError(Exception):
-    pass
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 class OcblacktopClientTimeoutError(Exception):
     pass
@@ -43,17 +51,27 @@ class OcblacktopClient:
             raise OcblacktopClientTimeoutError("OC Blacktop request timed out") from exc
 
         except httpx.HTTPStatusError as exc:
+            response_text = exc.response.text[:500]
+            logger.warning(
+                "OC Blacktop returned status %s for %s: %s",
+                exc.response.status_code,
+                exc.request.url,
+                response_text,
+            )
             raise OcblacktopClientError(
-                f"OC Blacktop returned status {exc.response.status_code}"
+                f"OC Blacktop returned status {exc.response.status_code}",
+                status_code=exc.response.status_code,
             ) from exc
 
         except httpx.HTTPError as exc:
+            logger.warning("OC Blacktop request failed: %s", exc)
             raise OcblacktopClientError("OC Blacktop request failed") from exc
 
         try:
             return Formula1EventsResponse.model_validate(response.json())
 
-        except ValidationError as exc:
+        except (JSONDecodeError, ValidationError) as exc:
+            logger.warning("OC Blacktop returned an invalid response: %s", exc)
             raise OcblacktopClientInvalidResponseError(
                 "OC Blacktop returned an invalid response"
             ) from exc
