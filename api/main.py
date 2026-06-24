@@ -1,11 +1,12 @@
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 
-from core.config import get_settings
-from routers.formula1_events import router as formula1_events_router
+from api.core.config import get_settings
+from api.routers.races import router as races_router
 
 app = FastAPI(title="F1 Status API")
+api_router_v1 = APIRouter(prefix="/api/v1")
 
 settings = get_settings()
 
@@ -17,7 +18,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(formula1_events_router)
+api_router_v1.include_router(races_router)
+
+app.include_router(api_router_v1)
 
 
 @app.get("/health")

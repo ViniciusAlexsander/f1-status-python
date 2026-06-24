@@ -4,7 +4,7 @@ from json import JSONDecodeError
 import httpx
 from pydantic import ValidationError
 
-from schemas.formula1_events import Formula1EventsResponse
+from api.schemas.formula1_events import Formula1EventsResponse
 
 logger = logging.getLogger(__name__)
 

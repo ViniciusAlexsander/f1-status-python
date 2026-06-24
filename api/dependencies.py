@@ -1,8 +1,8 @@
 from fastapi import Depends
 
-from core.config import Settings, get_settings
-from domain.ocblacktop_client import OcblacktopClient
-from services.formula1_events_service import Formula1EventsService
+from api.core.config import Settings, get_settings
+from api.domain.ocblacktop_client import OcblacktopClient
+from api.services.race_service import RaceService
 
 def get_ocblacktop_client(
     settings: Settings = Depends(get_settings),
@@ -15,5 +15,5 @@ def get_ocblacktop_client(
 
 def get_formula1_events_service(
     client: OcblacktopClient = Depends(get_ocblacktop_client),
-) -> Formula1EventsService:
-    return Formula1EventsService(client=client)
+) -> RaceService:
+    return RaceService(client=client)

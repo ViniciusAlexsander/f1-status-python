@@ -4,21 +4,20 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-
-class Formula1Country(BaseModel):
+class Country(BaseModel):
     name: str
     twoCode: str | None
     threeCode: str
 
 
-class Formula1Location(BaseModel):
+class Location(BaseModel):
     id: UUID
     name: str
     city: str
-    country: Formula1Country
+    country: Country
 
 
-class Formula1ScheduleItem(BaseModel):
+class ScheduleItem(BaseModel):
     id: UUID
     name: str
     type: str
@@ -27,15 +26,15 @@ class Formula1ScheduleItem(BaseModel):
     status: str
 
 
-class Formula1Event(BaseModel):
+class Race(BaseModel):
     id: UUID
     name: str
     dateStart: date
     dateEnd: date
     status: str
-    location: Formula1Location
+    location: Location
     sportId: str
-    schedule: list[Formula1ScheduleItem]
+    schedule: list[ScheduleItem]
 
 
 class PaginationMeta(BaseModel):
@@ -44,7 +43,14 @@ class PaginationMeta(BaseModel):
     total: int
     totalPages: int
 
-
 class Formula1EventsResponse(BaseModel):
-    data: list[Formula1Event]
+    data: list[Race]
+    meta: PaginationMeta
+
+class RaceListData(BaseModel):
+    races: list[Race]
+    nextRace: Race
+
+class RaceListResponse(BaseModel):
+    data: RaceListData
     meta: PaginationMeta

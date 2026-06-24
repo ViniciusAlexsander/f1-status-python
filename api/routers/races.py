@@ -1,23 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from dependencies import get_formula1_events_service
-from domain.ocblacktop_client import (
+from api.dependencies import get_formula1_events_service
+from api.domain.ocblacktop_client import (
     OcblacktopClientError,
     OcblacktopClientInvalidResponseError,
     OcblacktopClientTimeoutError,
 )
-from schemas.formula1_events import Formula1EventsResponse
-from services.formula1_events_service import Formula1EventsService
+from api.schemas.formula1_events import RaceListResponse
+from api.services.race_service import RaceService
 
-router = APIRouter(prefix="/api/v1/formula1", tags=["Formula 1"])
+router = APIRouter(prefix="/races", tags=["Formula 1"])
 
 
-@router.get("/events", response_model=Formula1EventsResponse)
-async def list_formula1_events(
-    service: Formula1EventsService = Depends(get_formula1_events_service),
-) -> Formula1EventsResponse:
+@router.get("", response_model=RaceListResponse)
+async def list_race(
+    service: RaceService = Depends(get_formula1_events_service),
+) -> RaceListResponse:
     try:
-        return await service.list_events()
+        return await service.list_races()
 
     except OcblacktopClientTimeoutError as exc:
         raise HTTPException(
