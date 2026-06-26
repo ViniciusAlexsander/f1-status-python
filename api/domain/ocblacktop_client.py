@@ -1,8 +1,10 @@
 import logging
 from json import JSONDecodeError
 
+from api.schemas.constructors_standings import TeamStandingData
+from api.schemas.drivers_standings import DriverStandingData
 import httpx
-from pydantic import ValidationError
+from pydantic import ValidationError, TypeAdapter
 
 from api.schemas.formula1_events import Formula1EventsResponse
 
@@ -69,6 +71,104 @@ class OcblacktopClient:
 
         try:
             return Formula1EventsResponse.model_validate(response.json())
+
+        except (JSONDecodeError, ValidationError) as exc:
+            logger.warning("OC Blacktop returned an invalid response: %s", exc)
+            raise OcblacktopClientInvalidResponseError(
+                "OC Blacktop returned an invalid response"
+            ) from exc
+        
+    async def get_drivers_standings(
+        self,
+        year: int,
+    ) -> list[DriverStandingData]:
+        url = f"{self.base_url}/formula1/standings/drivers"
+
+        headers = {
+            "Accept": "application/json",
+            "X-API-Key": self.api_key,
+        }
+
+        params = {
+            "year": year,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(url, headers=headers, params=params)
+                response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise OcblacktopClientTimeoutError("OC Blacktop request timed out") from exc
+
+        except httpx.HTTPStatusError as exc:
+            response_text = exc.response.text[:500]
+            logger.warning(
+                "OC Blacktop returned status %s for %s: %s",
+                exc.response.status_code,
+                exc.request.url,
+                response_text,
+            )
+            raise OcblacktopClientError(
+                f"OC Blacktop returned status {exc.response.status_code}",
+                status_code=exc.response.status_code,
+            ) from exc
+
+        except httpx.HTTPError as exc:
+            logger.warning("OC Blacktop request failed: %s", exc)
+            raise OcblacktopClientError("OC Blacktop request failed") from exc
+
+        try:
+            adapter = TypeAdapter(list[DriverStandingData])
+            return adapter.validate_python(response.json())
+
+        except (JSONDecodeError, ValidationError) as exc:
+            logger.warning("OC Blacktop returned an invalid response: %s", exc)
+            raise OcblacktopClientInvalidResponseError(
+                "OC Blacktop returned an invalid response"
+            ) from exc
+        
+    async def get_constructors_standings(
+        self,
+        year: int,
+    ) -> list[TeamStandingData]:
+        url = f"{self.base_url}/formula1/standings/constructors"
+
+        headers = {
+            "Accept": "application/json",
+            "X-API-Key": self.api_key,
+        }
+
+        params = {
+            "year": year,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(url, headers=headers, params=params)
+                response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise OcblacktopClientTimeoutError("OC Blacktop request timed out") from exc
+
+        except httpx.HTTPStatusError as exc:
+            response_text = exc.response.text[:500]
+            logger.warning(
+                "OC Blacktop returned status %s for %s: %s",
+                exc.response.status_code,
+                exc.request.url,
+                response_text,
+            )
+            raise OcblacktopClientError(
+                f"OC Blacktop returned status {exc.response.status_code}",
+                status_code=exc.response.status_code,
+            ) from exc
+
+        except httpx.HTTPError as exc:
+            logger.warning("OC Blacktop request failed: %s", exc)
+            raise OcblacktopClientError("OC Blacktop request failed") from exc
+
+        try:
+            adapter = TypeAdapter(list[TeamStandingData])
+            return adapter.validate_python(response.json())
 
         except (JSONDecodeError, ValidationError) as exc:
             logger.warning("OC Blacktop returned an invalid response: %s", exc)

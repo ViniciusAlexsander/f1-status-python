@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.core.config import get_settings
 from api.routers.races import router as races_router
+from api.routers.standings import router as standings_router
 
 app = FastAPI(title="F1 Status API")
 api_router_v1 = APIRouter(prefix="/api/v1")
@@ -19,6 +20,7 @@ app.add_middleware(
 )
 
 api_router_v1.include_router(races_router)
+api_router_v1.include_router(standings_router)
 
 app.include_router(api_router_v1)
 

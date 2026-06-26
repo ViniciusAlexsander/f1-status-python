@@ -1,3 +1,4 @@
+from api.services.standings_service import StandingsService
 from fastapi import Depends
 
 from api.core.config import Settings, get_settings
@@ -17,3 +18,8 @@ def get_formula1_events_service(
     client: OcblacktopClient = Depends(get_ocblacktop_client),
 ) -> RaceService:
     return RaceService(client=client)
+
+def get_standings_service(
+    client: OcblacktopClient = Depends(get_ocblacktop_client),
+) -> StandingsService:
+    return StandingsService(client=client)
