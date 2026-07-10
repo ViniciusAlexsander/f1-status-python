@@ -13,7 +13,7 @@ class Country(BaseModel):
 class Location(BaseModel):
     id: UUID
     name: str
-    city: str
+    city: str | None
     country: Country
 
 
