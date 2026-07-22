@@ -49,7 +49,8 @@ class Formula1EventsResponse(BaseModel):
 
 class RaceListData(BaseModel):
     races: list[Race]
-    nextRace: Race
+    nextRace: Race | None
+    currentRace: Race | None
 
 class RaceListResponse(BaseModel):
     data: RaceListData

@@ -15,11 +15,14 @@ class RaceService:
 
         sorted_races = sorted(response.data, key=lambda event: event.dateStart)
 
-        next_race = next((race for race in sorted_races if race.status == "scheduled" and race.dateStart >= today))
+        next_race = next((race for race in sorted_races if race.status == "scheduled" and race.dateStart >= today), None)
+
+        current_race = next((race for race in sorted_races if race.status == "ongoing"), None)
 
         data = RaceListData(
             races=sorted_races,
-            nextRace=next_race
+            nextRace=next_race,
+            currentRace=current_race
         )
 
         return RaceListResponse(
