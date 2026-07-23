@@ -1,15 +1,32 @@
+from contextlib import asynccontextmanager
+
 import uvicorn
-from fastapi import FastAPI, APIRouter
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.dependencies import create_livetiming_signalrcore_client
 from api.core.config import get_settings
+from api.routers.live_timing import router as live_timing_router
 from api.routers.races import router as races_router
 from api.routers.standings import router as standings_router
 
-app = FastAPI(title="F1 Status API")
-api_router_v1 = APIRouter(prefix="/api/v1")
 
 settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    livetiming_client = create_livetiming_signalrcore_client(settings)
+    app.state.livetiming_signalr_client = livetiming_client
+
+    try:
+        yield
+    finally:
+        await livetiming_client.disconnect()
+
+
+app = FastAPI(title="F1 Status API", lifespan=lifespan)
+api_router_v1 = APIRouter(prefix="/api/v1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,6 +38,7 @@ app.add_middleware(
 
 api_router_v1.include_router(races_router)
 api_router_v1.include_router(standings_router)
+api_router_v1.include_router(live_timing_router)
 
 app.include_router(api_router_v1)
 
