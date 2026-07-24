@@ -11,11 +11,6 @@ class LiveSessionService:
     async def stream_session_state(self) -> AsyncGenerator[dict, None]:
         await self.client.ensure_connected()
         queue = self.client.subscribe("SessionData")
-        current_state = {
-            "lap": 0,
-            "trackStatus": None,
-            "sessionStatus": None,
-        }
 
         try:
             while True:
@@ -24,6 +19,12 @@ class LiveSessionService:
 
                 if not isinstance(payload, dict):
                     continue
+
+                current_state = {
+                    "lap": 0,
+                    "trackStatus": None,
+                    "sessionStatus": None,
+                }
 
                 if "Series" in payload:
                     for lap_data in normalize_stream_data(payload["Series"]):

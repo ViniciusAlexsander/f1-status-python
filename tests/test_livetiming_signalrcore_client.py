@@ -58,6 +58,68 @@ class LivetimingSignalrcoreClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.payload, {"Series": []})
         self.assertTrue(event.is_snapshot)
 
+    async def test_dispatch_merges_partial_timing_updates(self) -> None:
+        client = self.create_client()
+        queue = client.subscribe("TimingData")
+
+        client._dispatch(
+            "TimingData",
+            {
+                "Lines": {
+                    "63": {
+                        "NumberOfLaps": 8,
+                        "Sectors": {"2": {"Value": "26.907"}},
+                    }
+                }
+            },
+            is_snapshot=True,
+        )
+        await asyncio.sleep(0)
+        client._dispatch(
+            "TimingData",
+            {
+                "Lines": {
+                    "63": {
+                        "Sectors": {"2": {"PreviousValue": "26.907"}},
+                        "Speeds": {"FL": {"Value": "264"}},
+                    }
+                }
+            },
+            is_snapshot=False,
+        )
+
+        first = await asyncio.wait_for(queue.get(), timeout=1)
+        second = await asyncio.wait_for(queue.get(), timeout=1)
+
+        self.assertEqual(
+            first.payload,
+            {
+                "Lines": {
+                    "63": {
+                        "NumberOfLaps": 8,
+                        "Sectors": {"2": {"Value": "26.907"}},
+                    }
+                }
+            },
+        )
+        self.assertEqual(
+            second.payload,
+            {
+                "Lines": {
+                    "63": {
+                        "NumberOfLaps": 8,
+                        "Sectors": {
+                            "2": {
+                                "Value": "26.907",
+                                "PreviousValue": "26.907",
+                            }
+                        },
+                        "Speeds": {"FL": {"Value": "264"}},
+                    }
+                }
+            },
+        )
+
     async def test_full_queue_drops_oldest_event(self) -> None:
         client = self.create_client(queue_size=1)
         queue = client.subscribe("TimingData")

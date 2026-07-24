@@ -1,3 +1,4 @@
+import copy
 import asyncio
 import logging
 import threading
@@ -37,6 +38,7 @@ class LivetimingSignalrcoreClient:
         self._connect_lock: asyncio.Lock | None = None
         self._connected = False
         self._lock = threading.RLock()
+        self._topic_state: DefaultDict[str, Any] = defaultdict(dict)
         self._subscribers: DefaultDict[str, set[asyncio.Queue[LiveTimingEvent]]] = (
             defaultdict(set)
         )
@@ -69,6 +71,7 @@ class LivetimingSignalrcoreClient:
             connection = self.connection
             self.connection = None
             self._connected = False
+            self._topic_state.clear()
 
         if connection:
             await asyncio.to_thread(connection.stop)
@@ -186,9 +189,10 @@ class LivetimingSignalrcoreClient:
             self._dispatch(topic, payload, is_snapshot=True)
 
     def _dispatch(self, topic: str, payload: Any, is_snapshot: bool) -> None:
+        resolved_payload = self._update_topic_state(topic, payload, is_snapshot)
         event = LiveTimingEvent(
             topic=topic,
-            payload=payload,
+            payload=resolved_payload,
             received_at=datetime.now(timezone.utc),
             is_snapshot=is_snapshot,
         )
@@ -205,6 +209,37 @@ class LivetimingSignalrcoreClient:
 
         for queue in subscribers:
             self._loop.call_soon_threadsafe(self._publish, queue, event)
+
+    def _update_topic_state(
+        self,
+        topic: str,
+        payload: Any,
+        is_snapshot: bool,
+    ) -> Any:
+        if not isinstance(payload, dict):
+            return payload
+
+        with self._lock:
+            if is_snapshot or topic not in self._topic_state:
+                self._topic_state[topic] = copy.deepcopy(payload)
+            else:
+                self._merge_dict(self._topic_state[topic], payload)
+
+            return copy.deepcopy(self._topic_state[topic])
+
+    def _merge_dict(self, target: dict[str, Any], update: dict[str, Any]) -> None:
+        for key, value in update.items():
+            existing = target.get(key)
+
+            if isinstance(existing, dict) and isinstance(value, dict):
+                self._merge_dict(existing, value)
+                continue
+
+            if isinstance(value, dict):
+                target[key] = copy.deepcopy(value)
+                continue
+
+            target[key] = value
 
     def _publish(
         self,
