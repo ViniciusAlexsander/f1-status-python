@@ -21,8 +21,8 @@ class ScheduleItem(BaseModel):
     id: UUID
     name: str
     type: str
-    startTime: datetime
-    endTime: datetime
+    startTime: datetime  | None
+    endTime: datetime | None
     status: str
 
 
