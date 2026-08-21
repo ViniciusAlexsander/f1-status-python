@@ -2,6 +2,8 @@ from api.domain.ocblacktop_client import OcblacktopClient
 from api.schemas.formula1_events import RaceListData, RaceListResponse
 from datetime import date
 
+from api.schemas.session_results import SessionResultsResponse
+
 LIMIT = 25
 
 class RaceService:
@@ -29,3 +31,7 @@ class RaceService:
             data=data,
             meta=response.meta,
         )
+
+    async def get_race_results(self, event_id: str, session_id: str) -> list[SessionResultsResponse]:
+        response = await self.client.get_sessions_results(eventId=event_id, sessionId=session_id)
+        return response

@@ -19,7 +19,7 @@ def get_ocblacktop_client(
     )
 
 
-def get_formula1_events_service(
+def get_formula1_race_service(
     client: OcblacktopClient = Depends(get_ocblacktop_client),
 ) -> RaceService:
     return RaceService(client=client)
