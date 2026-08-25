@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -20,6 +21,7 @@ class Settings(BaseSettings):
         "https://livetiming.formula1.com/signalrcore/negotiate"
     )
     livetiming_signalr_topics: str = "TimingData,SessionData"
+    redis_url: str = Field(..., alias="REDIS_URL")
     port: int = 8000
 
     model_config = SettingsConfigDict(

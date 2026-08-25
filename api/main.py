@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from redis.asyncio import Redis
 
 from api.dependencies import create_livetiming_signalrcore_client
 from api.core.config import get_settings
@@ -19,9 +20,13 @@ async def lifespan(app: FastAPI):
     livetiming_client = create_livetiming_signalrcore_client(settings)
     app.state.livetiming_signalr_client = livetiming_client
 
+    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    app.state.redis = redis
+
     try:
         yield
     finally:
+        await redis.aclose()
         await livetiming_client.disconnect()
 
 

@@ -1,5 +1,7 @@
 from fastapi import Depends, Request
+from redis.asyncio import Redis
 
+from api.services.live_timing_cache import LiveTimingCache
 from api.core.config import Settings, get_settings
 from api.domain.livetiming_auth import LivetimingAuthProvider
 from api.domain.livetiming_signalrcore_client import LivetimingSignalrcoreClient
@@ -52,11 +54,21 @@ def get_livetiming_signalrcore_client(
 ) -> LivetimingSignalrcoreClient:
     return request.app.state.livetiming_signalr_client
 
+def get_redis_client(request: Request) -> Redis:
+    return request.app.state.redis
+
+
+def get_live_timing_cache(
+    redis: Redis = Depends(get_redis_client),
+) -> LiveTimingCache:
+    return LiveTimingCache(redis=redis)
+
 
 def get_timing_service(
     client: LivetimingSignalrcoreClient = Depends(get_livetiming_signalrcore_client),
+    cache: LiveTimingCache = Depends(get_live_timing_cache),
 ) -> TimingService:
-    return TimingService(client=client)
+    return TimingService(client=client, cache=cache)
 
 
 def get_live_session_service(
