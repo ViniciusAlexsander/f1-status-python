@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     livetiming_signalr_topics: str = "TimingData,SessionData"
     redis_url: str = Field(..., alias="REDIS_URL")
     port: int = 8000
+    worker_poll_seconds: int = 60
+    worker_start_before_minutes: int = 30
+    worker_stop_after_minutes: int = 240
+    worker_reconnect_initial_seconds: float = 2.0
+    worker_reconnect_max_seconds: float = 60.0
+    live_timing_snapshot_ttl: int = 21600
 
     model_config = SettingsConfigDict(
         env_file=(ROOT_DIR / ".env", API_DIR / ".env"),
