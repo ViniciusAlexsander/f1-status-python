@@ -73,5 +73,6 @@ def get_timing_service(
 
 def get_live_session_service(
     client: LivetimingSignalrcoreClient = Depends(get_livetiming_signalrcore_client),
+    cache: LiveTimingCache = Depends(get_live_timing_cache),
 ) -> LiveSessionService:
-    return LiveSessionService(client=client)
+    return LiveSessionService(client=client, cache=cache)
