@@ -35,7 +35,7 @@ class LivetimingSignalrcoreClient:
 
         self.connection = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._connect_lock: asyncio.Lock | None = None
+        self._connect_lock = asyncio.Lock()
         self._connected = False
         self._lock = threading.RLock()
         self._topic_state: DefaultDict[str, Any] = defaultdict(dict)
@@ -56,9 +56,6 @@ class LivetimingSignalrcoreClient:
         await asyncio.to_thread(self._connect_sync)
 
     async def ensure_connected(self) -> None:
-        if not self._connect_lock:
-            self._connect_lock = asyncio.Lock()
-
         async with self._connect_lock:
             with self._lock:
                 if self._connected:
