@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 from redis.asyncio import Redis
 
@@ -48,11 +49,15 @@ async def run_worker() -> None:
                 races = await race_service.list_races()
             except Exception:
                 logger.exception("Erro ao buscar corridas")
-                await asyncio.sleep(60)
+                await asyncio.sleep(settings.worker_poll_seconds)
                 continue
             current_race = races.data.currentRace
 
-            if current_race and have_ongoing_session(current_race):
+            if current_race and should_listen_to_live_streams(
+                current_race,
+                datetime.now(timezone.utc),
+                settings.worker_start_before_minutes,
+            ):
                 if live_timing_task is None or live_timing_task.done():
                     logger.info("Iniciando stream de live timing")
                     live_timing_task = create_stream_task(
@@ -73,7 +78,12 @@ async def run_worker() -> None:
                 live_timing_task = None
                 live_session_task = None
     
-            await asyncio.sleep(60)
+            poll_seconds = (
+                settings.worker_race_poll_seconds
+                if current_race
+                else settings.worker_poll_seconds
+            )
+            await asyncio.sleep(poll_seconds)
     finally:
         await cancel_tasks(live_timing_task, live_session_task)
         await signalr_client.disconnect()
@@ -86,9 +96,35 @@ def main() -> None:
         logger.info("Worker encerrado")
 
 def have_ongoing_session(onGoingWeekend: Race) -> bool:
-    for scheduled_session in onGoingWeekend.schedule:
-        if scheduled_session.status == "ongoing":
+    return any(
+        scheduled_session.status == "ongoing"
+        for scheduled_session in onGoingWeekend.schedule
+    )
+
+
+def should_listen_to_live_streams(
+    race: Race,
+    now: datetime,
+    start_before_minutes: int,
+) -> bool:
+    if have_ongoing_session(race):
+        return True
+
+    window_end = now + timedelta(minutes=start_before_minutes)
+    for scheduled_session in race.schedule:
+        if (
+            scheduled_session.status != "scheduled"
+            or scheduled_session.startTime is None
+        ):
+            continue
+
+        start_time = scheduled_session.startTime
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+
+        if now <= start_time <= window_end:
             return True
+
     return False
         
 async def start_save_live_timing(timing_service: TimingService) -> None:
