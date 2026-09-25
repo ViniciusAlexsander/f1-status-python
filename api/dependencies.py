@@ -1,6 +1,7 @@
 from fastapi import Depends, Request
 from redis.asyncio import Redis
 
+from api.services.live_current_tyres_service import LiveCurrentTyresService
 from api.services.live_timing_cache import LiveTimingCache
 from api.core.config import Settings, get_settings
 from api.domain.livetiming_auth import LivetimingAuthProvider
@@ -76,3 +77,9 @@ def get_live_session_service(
     cache: LiveTimingCache = Depends(get_live_timing_cache),
 ) -> LiveSessionService:
     return LiveSessionService(client=client, cache=cache)
+
+def get_live_current_tyres_service(
+    livetimingSignalrcoreClient: LivetimingSignalrcoreClient = Depends(get_livetiming_signalrcore_client),
+    cache: LiveTimingCache = Depends(get_live_timing_cache),
+) -> LiveCurrentTyresService:
+    return LiveCurrentTyresService(livetimingSignalrcoreClient=livetimingSignalrcoreClient, cache=cache)

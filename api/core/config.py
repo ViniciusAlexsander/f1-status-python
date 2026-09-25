@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     livetiming_signalr_negotiate_url: str = (
         "https://livetiming.formula1.com/signalrcore/negotiate"
     )
-    livetiming_signalr_topics: str = "TimingData,SessionData"
+    livetiming_signalr_topics: str = "TimingData,SessionData,CurrentTyres"
     redis_url: str = Field(..., alias="REDIS_URL")
     port: int = 8000
     worker_race_poll_seconds: int = 600

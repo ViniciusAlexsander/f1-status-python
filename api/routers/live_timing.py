@@ -7,7 +7,8 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from api.dependencies import get_live_session_service, get_timing_service
+from api.dependencies import get_live_current_tyres_service, get_live_session_service, get_timing_service
+from api.services.live_current_tyres_service import LiveCurrentTyresService
 from api.services.live_session_service import LiveSessionService
 from api.services.timing_service import TimingService
 
@@ -33,6 +34,15 @@ async def stream_session_state(
 ) -> StreamingResponse:
     return StreamingResponse(
         _sse_events("session_update", service.stream_session_state()),
+        media_type="text/event-stream",
+    )
+
+@router.get("/current-tyres")
+async def stream_current_tyres_state(
+    service: LiveCurrentTyresService = Depends(get_live_current_tyres_service),
+) -> StreamingResponse:
+    return StreamingResponse(
+        _sse_events("current_tyres_update", service.stream_current_tyres_state()),
         media_type="text/event-stream",
     )
 
