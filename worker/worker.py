@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from redis.asyncio import Redis
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 async def run_worker() -> None:
     logger.info("Worker iniciado")
     settings = get_settings()
+    worker_timezone = ZoneInfo(settings.worker_timezone)
 
     race_service = RaceService(
         client=OcblacktopClient(
@@ -49,7 +51,7 @@ async def run_worker() -> None:
                 races = await race_service.list_races()
             except Exception:
                 logger.exception("Erro ao buscar corridas")
-                await asyncio.sleep(settings.worker_poll_seconds)
+                await asyncio.sleep(settings.worker_error_retry_seconds)
                 continue
             current_race = races.data.currentRace
 
@@ -81,7 +83,10 @@ async def run_worker() -> None:
             poll_seconds = (
                 settings.worker_race_poll_seconds
                 if current_race
-                else settings.worker_poll_seconds
+                else seconds_until_next_daily_run(
+                    datetime.now(timezone.utc),
+                    worker_timezone,
+                )
             )
             await asyncio.sleep(poll_seconds)
     finally:
@@ -100,6 +105,24 @@ def have_ongoing_session(onGoingWeekend: Race) -> bool:
         scheduled_session.status == "ongoing"
         for scheduled_session in onGoingWeekend.schedule
     )
+
+
+def seconds_until_next_daily_run(
+    now: datetime,
+    worker_timezone: ZoneInfo,
+    run_hour: int = 1,
+) -> int:
+    local_now = now.astimezone(worker_timezone)
+    next_run = local_now.replace(
+        hour=run_hour,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    if next_run <= local_now:
+        next_run += timedelta(days=1)
+
+    return max(1, int((next_run - local_now).total_seconds()))
 
 
 def should_listen_to_live_streams(

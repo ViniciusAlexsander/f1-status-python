@@ -23,9 +23,10 @@ class Settings(BaseSettings):
     livetiming_signalr_topics: str = "TimingData,SessionData"
     redis_url: str = Field(..., alias="REDIS_URL")
     port: int = 8000
-    worker_poll_seconds: int = 86400
     worker_race_poll_seconds: int = 600
     worker_start_before_minutes: int = 10
+    worker_timezone: str = "America/Sao_Paulo"
+    worker_error_retry_seconds: int = 600
     worker_stop_after_minutes: int = 240
     worker_reconnect_initial_seconds: float = 2.0
     worker_reconnect_max_seconds: float = 60.0
