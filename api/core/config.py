@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     worker_stop_after_minutes: int = 240
     worker_reconnect_initial_seconds: float = 2.0
     worker_reconnect_max_seconds: float = 60.0
+    worker_schedule_cache_ttl_seconds: int = 172800
+    worker_schedule_refresh_seconds: int = 21600
+    worker_idle_check_seconds: int = 3600
+    worker_near_session_check_seconds: int = 300
+    worker_admin_token: str | None = None
     live_timing_snapshot_ttl: int = 21600
 
     model_config = SettingsConfigDict(

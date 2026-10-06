@@ -11,6 +11,7 @@ from api.services.live_session_service import LiveSessionService
 from api.services.race_service import RaceService
 from api.services.standings_service import StandingsService
 from api.services.timing_service import TimingService
+from api.services.worker_control_service import WorkerControlService
 
 
 def get_ocblacktop_client(
@@ -47,6 +48,8 @@ def create_livetiming_signalrcore_client(
         negotiate_url=settings.livetiming_signalr_negotiate_url,
         access_token_factory=auth_provider.get_auth_token,
         topics=settings.signalr_topics,
+        reconnect_initial_seconds=settings.worker_reconnect_initial_seconds,
+        reconnect_max_seconds=settings.worker_reconnect_max_seconds,
     )
 
 
@@ -63,6 +66,16 @@ def get_live_timing_cache(
     redis: Redis = Depends(get_redis_client),
 ) -> LiveTimingCache:
     return LiveTimingCache(redis=redis)
+
+
+def get_worker_control_service(
+    redis: Redis = Depends(get_redis_client),
+    settings: Settings = Depends(get_settings),
+) -> WorkerControlService:
+    return WorkerControlService(
+        redis=redis,
+        schedule_ttl_seconds=settings.worker_schedule_cache_ttl_seconds,
+    )
 
 
 def get_timing_service(

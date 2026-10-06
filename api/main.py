@@ -10,6 +10,7 @@ from api.core.config import get_settings
 from api.routers.live_timing import router as live_timing_router
 from api.routers.races import router as races_router
 from api.routers.standings import router as standings_router
+from api.routers.worker import router as worker_router
 
 
 settings = get_settings()
@@ -44,6 +45,7 @@ app.add_middleware(
 api_router_v1.include_router(races_router)
 api_router_v1.include_router(standings_router)
 api_router_v1.include_router(live_timing_router)
+api_router_v1.include_router(worker_router)
 
 app.include_router(api_router_v1)
 

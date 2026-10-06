@@ -28,10 +28,18 @@ class FakeLiveTimingClient:
         self.unsubscribed = topic == "TimingData" and queue is self.queue
 
 
+class FakeCache:
+    async def get_snapshot(self, cache_key: str):
+        return None
+
+    async def save_snapshot(self, cache_key: str, data: dict) -> None:
+        return None
+
+
 class TimingServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_stream_timing_data_merges_partial_line_updates(self) -> None:
         client = FakeLiveTimingClient()
-        service = TimingService(client=client)
+        service = TimingService(client=client, cache=FakeCache())
         stream = service.stream_timing_data()
 
         next_event = asyncio.create_task(stream.__anext__())

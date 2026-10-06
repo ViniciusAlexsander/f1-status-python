@@ -137,13 +137,20 @@ class LivetimingSignalrcoreClientTest(unittest.IsolatedAsyncioTestCase):
     async def test_ensure_connected_connects_only_once(self) -> None:
         client = self.create_client()
         calls = 0
+        subscribed = []
 
-        async def connect() -> None:
+        class Connection:
+            def send(self, method, args, on_invocation=None):
+                subscribed.append((method, args, self))
+
+        def connect_sync() -> None:
             nonlocal calls
             calls += 1
-            client._connected = True
+            connection = Connection()
+            client.connection = connection
+            client._loop.call_soon_threadsafe(lambda: client._on_open(connection))
 
-        client.connect = connect
+        client._connect_sync = connect_sync
 
         await asyncio.gather(
             client.ensure_connected(),
@@ -151,6 +158,87 @@ class LivetimingSignalrcoreClientTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(calls, 1)
+        self.assertTrue(client.is_connected)
+        self.assertEqual(len(subscribed), 1)
+        self.assertEqual(subscribed[0][0], "Subscribe")
+        self.assertEqual(subscribed[0][1], [["TimingData", "SessionData"]])
+
+    async def test_ensure_connected_fails_when_handshake_closes(self) -> None:
+        client = self.create_client()
+
+        class Connection:
+            pass
+
+        def connect_sync() -> None:
+            connection = Connection()
+            client.connection = connection
+            client._loop.call_soon_threadsafe(lambda: client._on_close(connection))
+
+        client._connect_sync = connect_sync
+
+        with self.assertRaises(ConnectionError):
+            await client.ensure_connected()
+
+        self.assertFalse(client.is_connected)
+
+    async def test_ensure_connected_fails_when_handshake_errors(self) -> None:
+        client = self.create_client()
+        stopped = []
+
+        class Connection:
+            def stop(self) -> None:
+                stopped.append(self)
+
+        def connect_sync() -> None:
+            connection = Connection()
+            client.connection = connection
+            client._loop.call_soon_threadsafe(
+                lambda: client._on_error(connection, "handshake failed")
+            )
+
+        client._connect_sync = connect_sync
+
+        with self.assertRaises(ConnectionError):
+            await client.ensure_connected()
+
+        self.assertFalse(client.is_connected)
+        self.assertIsNone(client.connection)
+        self.assertEqual(len(stopped), 1)
+
+    async def test_unexpected_close_reconnects_when_subscribed(self) -> None:
+        client = self.create_client()
+        client.reconnect_initial_seconds = 0.01
+        client._reconnect_delay = 0.01
+        client.subscribe("TimingData")
+        reconnects = 0
+
+        async def ensure_connected() -> None:
+            nonlocal reconnects
+            reconnects += 1
+            client._connected = True
+
+        client.ensure_connected = ensure_connected
+        client._on_close(object())
+        await asyncio.sleep(0.05)
+
+        self.assertGreaterEqual(reconnects, 1)
+        self.assertTrue(client.is_connected)
+
+    async def test_disconnect_does_not_reconnect(self) -> None:
+        client = self.create_client()
+        client.subscribe("TimingData")
+        reconnects = 0
+
+        async def ensure_connected() -> None:
+            nonlocal reconnects
+            reconnects += 1
+
+        client.ensure_connected = ensure_connected
+        await client.disconnect()
+        client._on_close(object())
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(reconnects, 0)
 
     async def test_get_aws_cookie_retries_with_post_after_options_405(self) -> None:
         client = self.create_client()
@@ -223,9 +311,6 @@ class LivetimingSignalrcoreClientTest(unittest.IsolatedAsyncioTestCase):
         class Builder:
             def with_url(self, url: str, options: dict) -> "Builder":
                 captured_options.update(options)
-                return self
-
-            def configure_logging(self, level: int) -> "Builder":
                 return self
 
             def build(self) -> Connection:

@@ -23,6 +23,8 @@ services:
 
   worker:
     image: python:3.12
+    env_file:
+      - .env
     volumes:
       - .:/app
     working_dir: /app/worker

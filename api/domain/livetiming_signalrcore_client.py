@@ -9,6 +9,8 @@ from typing import Any, Callable, DefaultDict
 
 logger = logging.getLogger(__name__)
 
+HANDSHAKE_TIMEOUT_SECONDS = 30.0
+
 
 @dataclass(frozen=True)
 class LiveTimingEvent:
@@ -26,17 +28,27 @@ class LivetimingSignalrcoreClient:
         access_token_factory: Callable[[], str | None],
         topics: list[str],
         queue_size: int = 100,
+        handshake_timeout_seconds: float = HANDSHAKE_TIMEOUT_SECONDS,
+        reconnect_initial_seconds: float = 2.0,
+        reconnect_max_seconds: float = 60.0,
     ) -> None:
         self.connection_url = connection_url
         self.negotiate_url = negotiate_url
         self.access_token_factory = access_token_factory
         self.topics = topics
         self.queue_size = queue_size
+        self.handshake_timeout_seconds = handshake_timeout_seconds
+        self.reconnect_initial_seconds = reconnect_initial_seconds
+        self.reconnect_max_seconds = reconnect_max_seconds
 
         self.connection = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._connect_lock = asyncio.Lock()
         self._connected = False
+        self._stopping = False
+        self._ready: asyncio.Future[None] | None = None
+        self._reconnect_task: asyncio.Task[None] | None = None
+        self._reconnect_delay = reconnect_initial_seconds
         self._lock = threading.RLock()
         self._topic_state: DefaultDict[str, Any] = defaultdict(dict)
         self._subscribers: DefaultDict[str, set[asyncio.Queue[LiveTimingEvent]]] = (
@@ -48,30 +60,63 @@ class LivetimingSignalrcoreClient:
         return self._connected
 
     async def connect(self) -> None:
-        with self._lock:
+        await self.ensure_connected()
+
+    async def ensure_connected(self) -> None:
+        if self._stopping:
+            raise RuntimeError("SignalRCore client is stopping")
+
+        async with self._connect_lock:
             if self._connected:
                 return
 
-        self._loop = asyncio.get_running_loop()
-        await asyncio.to_thread(self._connect_sync)
+            self._loop = asyncio.get_running_loop()
 
-    async def ensure_connected(self) -> None:
-        async with self._connect_lock:
-            with self._lock:
-                if self._connected:
-                    return
+            if self._ready is None or self._ready.done():
+                self._ready = self._loop.create_future()
+                try:
+                    await asyncio.to_thread(self._connect_sync)
+                except Exception as exc:
+                    self._set_ready_exception(exc)
+                    raise
 
-            await self.connect()
+            ready = self._ready
+
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(ready),
+                timeout=self.handshake_timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            logger.error("SignalRCore handshake timed out")
+            await self._stop_current_connection()
+            timeout_error = TimeoutError("SignalRCore handshake timed out")
+            self._set_ready_exception(timeout_error)
+            raise timeout_error from exc
 
     async def disconnect(self) -> None:
         with self._lock:
+            self._stopping = True
             connection = self.connection
             self.connection = None
             self._connected = False
             self._topic_state.clear()
 
+        reconnect_task = self._reconnect_task
+        self._reconnect_task = None
+
+        if reconnect_task and not reconnect_task.done():
+            reconnect_task.cancel()
+            try:
+                await reconnect_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._ready is not None and not self._ready.done():
+            self._ready.cancel()
+
         if connection:
-            await asyncio.to_thread(connection.stop)
+            await asyncio.to_thread(self._stop_hub, connection)
 
     def subscribe(self, topic: str) -> asyncio.Queue[LiveTimingEvent]:
         queue: asyncio.Queue[LiveTimingEvent] = asyncio.Queue(maxsize=self.queue_size)
@@ -98,6 +143,14 @@ class LivetimingSignalrcoreClient:
                 "Install project requirements before using live timing endpoints."
             ) from exc
 
+        previous = None
+        with self._lock:
+            previous = self.connection
+            self.connection = None
+
+        if previous:
+            self._stop_hub(previous)
+
         aws_cookie = self._get_aws_cookie(requests)
         headers = {"Cookie": f"AWSALBCORS={aws_cookie}"} if aws_cookie else {}
 
@@ -113,13 +166,12 @@ class LivetimingSignalrcoreClient:
                 self.connection_url,
                 options=connection_options,
             )
-            .configure_logging(logging.INFO)
             .build()
         )
 
-        connection.on_open(self._on_open)
-        connection.on_close(self._on_close)
-        connection.on_error(self._on_error)
+        connection.on_open(lambda: self._on_open(connection))
+        connection.on_close(lambda: self._on_close(connection))
+        connection.on_error(lambda error: self._on_error(connection, error))
         connection.on("feed", self._on_feed)
 
         with self._lock:
@@ -138,15 +190,13 @@ class LivetimingSignalrcoreClient:
 
         return response.cookies.get("AWSALBCORS")
 
-    def _on_open(self) -> None:
+    def _on_open(self, connection: Any) -> None:
         logger.info("Formula 1 SignalRCore connection opened")
 
         with self._lock:
-            connection = self.connection
-
-        if not connection:
-            logger.warning("SignalRCore opened without a connection object")
-            return
+            if self._stopping or self.connection is not connection:
+                logger.warning("Ignoring SignalRCore open for a stale connection")
+                return
 
         connection.send(
             "Subscribe",
@@ -155,16 +205,56 @@ class LivetimingSignalrcoreClient:
         )
 
         with self._lock:
+            if self.connection is not connection:
+                return
+
             self._connected = True
+            self._reconnect_delay = self.reconnect_initial_seconds
 
-    def _on_close(self) -> None:
-        logger.warning("Formula 1 SignalRCore connection closed")
+        self._set_ready_result()
 
+    def _on_close(self, connection: Any) -> None:
         with self._lock:
+            if self.connection is not None and self.connection is not connection:
+                return
+
+            logger.warning("Formula 1 SignalRCore connection closed")
             self._connected = False
 
-    def _on_error(self, error: Any) -> None:
+            if self.connection is connection:
+                self.connection = None
+
+            stopping = self._stopping
+            has_subscribers = any(self._subscribers.values())
+
+        if stopping:
+            return
+
+        self._set_ready_exception(ConnectionError("SignalRCore connection closed"))
+
+        if has_subscribers:
+            self._schedule_reconnect()
+
+    def _on_error(self, connection: Any, error: Any) -> None:
         logger.error("Formula 1 SignalRCore connection error: %s", error)
+
+        with self._lock:
+            if self.connection is not connection:
+                return
+
+            self._connected = False
+            self.connection = None
+            stopping = self._stopping
+            has_subscribers = any(self._subscribers.values())
+
+        self._set_ready_exception(
+            ConnectionError(f"SignalRCore connection error: {error}")
+        )
+
+        self._stop_hub(connection)
+
+        if not stopping and has_subscribers:
+            self._schedule_reconnect()
 
     def _on_feed(self, message: Any) -> None:
         try:
@@ -250,3 +340,100 @@ class LivetimingSignalrcoreClient:
                 pass
 
         queue.put_nowait(event)
+
+    def _has_subscribers(self) -> bool:
+        with self._lock:
+            return any(self._subscribers.values())
+
+    def _schedule_reconnect(self) -> None:
+        loop = self._loop
+
+        if loop is None:
+            return
+
+        def start_reconnect() -> None:
+            if self._stopping or self._connected:
+                return
+
+            if self._reconnect_task is not None and not self._reconnect_task.done():
+                return
+
+            if not self._has_subscribers():
+                return
+
+            self._reconnect_task = loop.create_task(self._reconnect())
+
+        loop.call_soon_threadsafe(start_reconnect)
+
+    async def _reconnect(self) -> None:
+        delay = self._reconnect_delay
+        logger.info("Reconnecting to Formula 1 SignalRCore in %.1fs", delay)
+        await asyncio.sleep(delay)
+
+        if self._stopping or self._connected or not self._has_subscribers():
+            return
+
+        try:
+            await self.ensure_connected()
+            self._reconnect_delay = self.reconnect_initial_seconds
+        except Exception:
+            logger.exception("Formula 1 SignalRCore reconnect failed")
+            self._reconnect_delay = min(
+                self._reconnect_delay * 2,
+                self.reconnect_max_seconds,
+            )
+            self._schedule_reconnect()
+
+    def _set_ready_result(self) -> None:
+        loop = self._loop
+
+        if loop is None:
+            return
+
+        def complete() -> None:
+            if self._ready is None or self._ready.done():
+                return
+
+            self._ready.set_result(None)
+
+        loop.call_soon_threadsafe(complete)
+
+    def _set_ready_exception(self, error: BaseException) -> None:
+        loop = self._loop
+
+        if loop is None:
+            if self._ready is not None and not self._ready.done():
+                self._ready.set_exception(error)
+            return
+
+        def complete() -> None:
+            if self._ready is None or self._ready.done():
+                return
+
+            self._ready.set_exception(error)
+
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+
+        if running is loop:
+            complete()
+        else:
+            loop.call_soon_threadsafe(complete)
+
+    async def _stop_current_connection(self) -> None:
+        with self._lock:
+            connection = self.connection
+            self.connection = None
+            self._connected = False
+
+        if connection:
+            await asyncio.to_thread(self._stop_hub, connection)
+
+    @staticmethod
+    def _stop_hub(connection: Any) -> None:
+        try:
+            connection.stop()
+        except Exception:
+            logger.warning("Failed to stop SignalRCore connection", exc_info=True)
