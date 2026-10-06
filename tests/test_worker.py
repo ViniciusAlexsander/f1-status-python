@@ -143,7 +143,6 @@ class WorkerScheduleTest(unittest.TestCase):
         self.assertEqual(
             seconds_until_next_worker_run(
                 schedule,
-                None,
                 self.now,
                 False,
                 idle_check_seconds=3600,

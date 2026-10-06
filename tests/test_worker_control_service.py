@@ -43,21 +43,11 @@ class WorkerControlServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restored, schedule)
         self.assertEqual(redis.expirations[service.SCHEDULE_KEY], 123)
 
-    async def test_manual_live_start_stop_and_status(self) -> None:
+    async def test_status_returns_schedule_without_manual_controls(self) -> None:
         redis = FakeRedis()
         service = WorkerControlService(redis=redis)
-        now = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
-
-        manual_live_until = await service.start_manual_live(30, now=now)
-        await service.request_schedule_refresh()
         status = await service.get_status()
 
-        self.assertEqual(manual_live_until, status.manualLiveUntil)
-        self.assertTrue(status.scheduleRefreshRequested)
-
-        await service.stop_manual_live()
-        await service.clear_schedule_refresh_requested()
-        status = await service.get_status()
-
-        self.assertIsNone(status.manualLiveUntil)
-        self.assertFalse(status.scheduleRefreshRequested)
+        self.assertIsNone(status.schedule)
+        self.assertIsNotNone(status.checkedAt.tzinfo)
+        self.assertNotIn("scheduleRefreshRequested", type(status).model_fields)

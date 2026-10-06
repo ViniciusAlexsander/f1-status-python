@@ -3,10 +3,20 @@ from types import SimpleNamespace
 
 from fastapi import HTTPException
 
-from api.routers.worker import require_worker_admin_token
+from api.routers.worker import require_worker_admin_token, router
 
 
 class WorkerRouterTest(unittest.TestCase):
+    def test_exposes_status_but_not_manual_schedule_refresh(self) -> None:
+        routes = {
+            (route.path, method)
+            for route in router.routes
+            for method in route.methods or set()
+        }
+
+        self.assertIn(("/worker/status", "GET"), routes)
+        self.assertNotIn(("/worker/schedule/refresh", "POST"), routes)
+
     def test_rejects_when_admin_token_is_not_configured(self) -> None:
         with self.assertRaises(HTTPException) as context:
             require_worker_admin_token(

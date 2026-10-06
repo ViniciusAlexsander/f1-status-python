@@ -55,14 +55,7 @@ async def run_worker() -> None:
         while True:
             now = datetime.now(timezone.utc)
             schedule = await worker_control.get_schedule()
-            manual_live_until = await worker_control.get_manual_live_until()
-            refresh_requested = await worker_control.is_schedule_refresh_requested()
 
-            if manual_live_until and manual_live_until <= now:
-                await worker_control.stop_manual_live()
-                manual_live_until = None
-
-            manual_live_active = is_manual_live_active(manual_live_until, now)
             schedule_live_active = is_schedule_live_active(schedule, now)
             schedule_refresh_due = should_refresh_schedule(
                 schedule,
@@ -70,8 +63,7 @@ async def run_worker() -> None:
                 settings.worker_schedule_refresh_seconds,
             )
             should_refresh = (
-                refresh_requested
-                or (schedule is None and not manual_live_active)
+                schedule is None
                 or (schedule_refresh_due and not schedule_live_active)
             )
 
@@ -88,14 +80,14 @@ async def run_worker() -> None:
                 except Exception:
                     logger.exception("Erro ao atualizar agenda do worker")
 
-                    if schedule is None and not manual_live_active:
+                    if schedule is None:
                         await cancel_tasks(live_timing_task, live_session_task)
                         live_timing_task = None
                         live_session_task = None
                         await asyncio.sleep(settings.worker_error_retry_seconds)
                         continue
 
-            should_listen = manual_live_active or schedule_live_active
+            should_listen = schedule_live_active
 
             if should_listen:
                 if live_timing_task is None or live_timing_task.done():
@@ -123,14 +115,13 @@ async def run_worker() -> None:
 
             poll_seconds = seconds_until_next_worker_run(
                 schedule,
-                manual_live_until,
                 now,
                 should_listen,
                 settings.worker_idle_check_seconds,
                 settings.worker_near_session_check_seconds,
             )
 
-            if schedule is None and not manual_live_active and not refresh_requested:
+            if schedule is None:
                 poll_seconds = min(
                     poll_seconds,
                     seconds_until_next_daily_run(now, worker_timezone),
@@ -221,7 +212,6 @@ async def refresh_worker_schedule(
     else:
         await worker_control.save_schedule(schedule)
 
-    await worker_control.clear_schedule_refresh_requested()
     return schedule
 
 
@@ -296,13 +286,6 @@ def normalize_datetime(value: datetime | None, fallback: datetime) -> datetime:
     return resolved.astimezone(timezone.utc)
 
 
-def is_manual_live_active(
-    manual_live_until: datetime | None,
-    now: datetime,
-) -> bool:
-    return manual_live_until is not None and manual_live_until > now
-
-
 def is_schedule_live_active(
     schedule: WorkerSchedule | None,
     now: datetime,
@@ -323,7 +306,6 @@ def should_refresh_schedule(
 
 def seconds_until_next_worker_run(
     schedule: WorkerSchedule | None,
-    manual_live_until: datetime | None,
     now: datetime,
     is_listening: bool,
     idle_check_seconds: int,
@@ -331,9 +313,6 @@ def seconds_until_next_worker_run(
 ) -> int:
     if is_listening:
         candidates = [near_session_check_seconds]
-
-        if manual_live_until:
-            candidates.append(seconds_between(now, manual_live_until))
 
         if schedule and schedule.listenUntil >= now:
             candidates.append(seconds_between(now, schedule.listenUntil))
