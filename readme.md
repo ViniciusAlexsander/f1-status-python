@@ -31,3 +31,13 @@ Endpoints SSE:
 
 - `GET /api/v1/live-timing/timing`
 - `GET /api/v1/live-timing/session`
+- `GET /api/v1/live-timing/current-tyres`
+- `GET /api/v1/live-timing/session-info`
+- `GET /api/v1/live-timing/extrapolated-clock`
+- `GET /api/v1/live-timing/weather-data`
+- `GET /api/v1/live-timing/race-control-messages`
+
+Os streams de `SessionInfo`, `ExtrapolatedClock`, `WeatherData` e
+`RaceControlMessages` transmitem o payload JSON recebido sem transformação ou
+persistência no Redis. Esses tópicos são incluídos automaticamente mesmo quando
+`LIVETIMING_SIGNALR_TOPICS` é configurado manualmente.

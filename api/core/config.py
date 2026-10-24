@@ -4,6 +4,8 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from api.domain.live_topics import REQUIRED_SIGNALR_TOPICS
+
 ROOT_DIR = Path(__file__).resolve().parents[2]
 API_DIR = Path(__file__).resolve().parents[1]
 
@@ -20,7 +22,7 @@ class Settings(BaseSettings):
     livetiming_signalr_negotiate_url: str = (
         "https://livetiming.formula1.com/signalrcore/negotiate"
     )
-    livetiming_signalr_topics: str = "TimingData,SessionData,CurrentTyres"
+    livetiming_signalr_topics: str = ",".join(REQUIRED_SIGNALR_TOPICS)
     redis_url: str = Field(..., alias="REDIS_URL")
     port: int = 8000
     worker_race_poll_seconds: int = 600
@@ -53,11 +55,12 @@ class Settings(BaseSettings):
 
     @property
     def signalr_topics(self) -> list[str]:
-        return [
+        configured_topics = [
             topic.strip()
             for topic in self.livetiming_signalr_topics.split(",")
             if topic.strip()
         ]
+        return list(dict.fromkeys([*configured_topics, *REQUIRED_SIGNALR_TOPICS]))
 
 
 @lru_cache

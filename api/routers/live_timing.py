@@ -7,9 +7,15 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from api.dependencies import get_live_current_tyres_service, get_live_session_service, get_timing_service
+from api.dependencies import (
+    get_live_current_tyres_service,
+    get_live_session_service,
+    get_live_topic_stream_service,
+    get_timing_service,
+)
 from api.services.live_current_tyres_service import LiveCurrentTyresService
 from api.services.live_session_service import LiveSessionService
+from api.services.live_topic_stream_service import LiveTopicStreamService
 from api.services.timing_service import TimingService
 
 router = APIRouter(prefix="/live-timing", tags=["Live Timing"])
@@ -47,9 +53,52 @@ async def stream_current_tyres_state(
     )
 
 
+@router.get("/session-info")
+async def stream_session_info(
+    service: LiveTopicStreamService = Depends(get_live_topic_stream_service),
+) -> StreamingResponse:
+    return _topic_stream_response("SessionInfo", "session_info_update", service)
+
+
+@router.get("/extrapolated-clock")
+async def stream_extrapolated_clock(
+    service: LiveTopicStreamService = Depends(get_live_topic_stream_service),
+) -> StreamingResponse:
+    return _topic_stream_response(
+        "ExtrapolatedClock", "extrapolated_clock_update", service
+    )
+
+
+@router.get("/weather-data")
+async def stream_weather_data(
+    service: LiveTopicStreamService = Depends(get_live_topic_stream_service),
+) -> StreamingResponse:
+    return _topic_stream_response("WeatherData", "weather_data_update", service)
+
+
+@router.get("/race-control-messages")
+async def stream_race_control_messages(
+    service: LiveTopicStreamService = Depends(get_live_topic_stream_service),
+) -> StreamingResponse:
+    return _topic_stream_response(
+        "RaceControlMessages", "race_control_messages_update", service
+    )
+
+
+def _topic_stream_response(
+    topic: str,
+    event_name: str,
+    service: LiveTopicStreamService,
+) -> StreamingResponse:
+    return StreamingResponse(
+        _sse_events(event_name, service.stream_topic(topic)),
+        media_type="text/event-stream",
+    )
+
+
 async def _sse_events(
     event_name: str,
-    source: AsyncGenerator[dict[str, Any], None],
+    source: AsyncGenerator[Any, None],
 ) -> AsyncGenerator[str, None]:
     next_event = asyncio.create_task(source.__anext__())
 
@@ -83,4 +132,7 @@ async def _sse_events(
         if not next_event.done():
             next_event.cancel()
 
-        await source.aclose()
+        await asyncio.gather(next_event, return_exceptions=True)
+
+        if not source.ag_running:
+            await source.aclose()

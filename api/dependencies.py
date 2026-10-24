@@ -8,6 +8,7 @@ from api.domain.livetiming_auth import LivetimingAuthProvider
 from api.domain.livetiming_signalrcore_client import LivetimingSignalrcoreClient
 from api.domain.ocblacktop_client import OcblacktopClient
 from api.services.live_session_service import LiveSessionService
+from api.services.live_topic_stream_service import LiveTopicStreamService
 from api.services.race_service import RaceService
 from api.services.standings_service import StandingsService
 from api.services.timing_service import TimingService
@@ -96,3 +97,9 @@ def get_live_current_tyres_service(
     cache: LiveTimingCache = Depends(get_live_timing_cache),
 ) -> LiveCurrentTyresService:
     return LiveCurrentTyresService(livetimingSignalrcoreClient=livetimingSignalrcoreClient, cache=cache)
+
+
+def get_live_topic_stream_service(
+    client: LivetimingSignalrcoreClient = Depends(get_livetiming_signalrcore_client),
+) -> LiveTopicStreamService:
+    return LiveTopicStreamService(client=client)

@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, DefaultDict
 
+from api.domain.live_topics import RAW_FORWARD_SIGNALR_TOPICS
+
 logger = logging.getLogger(__name__)
 
 HANDSHAKE_TIMEOUT_SECONDS = 30.0
@@ -31,6 +33,7 @@ class LivetimingSignalrcoreClient:
         handshake_timeout_seconds: float = HANDSHAKE_TIMEOUT_SECONDS,
         reconnect_initial_seconds: float = 2.0,
         reconnect_max_seconds: float = 60.0,
+        raw_payload_topics: tuple[str, ...] = RAW_FORWARD_SIGNALR_TOPICS,
     ) -> None:
         self.connection_url = connection_url
         self.negotiate_url = negotiate_url
@@ -40,6 +43,7 @@ class LivetimingSignalrcoreClient:
         self.handshake_timeout_seconds = handshake_timeout_seconds
         self.reconnect_initial_seconds = reconnect_initial_seconds
         self.reconnect_max_seconds = reconnect_max_seconds
+        self.raw_payload_topics = frozenset(raw_payload_topics)
 
         self.connection = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -276,7 +280,10 @@ class LivetimingSignalrcoreClient:
             self._dispatch(topic, payload, is_snapshot=True)
 
     def _dispatch(self, topic: str, payload: Any, is_snapshot: bool) -> None:
-        resolved_payload = self._update_topic_state(topic, payload, is_snapshot)
+        if topic in self.raw_payload_topics:
+            resolved_payload = copy.deepcopy(payload)
+        else:
+            resolved_payload = self._update_topic_state(topic, payload, is_snapshot)
         event = LiveTimingEvent(
             topic=topic,
             payload=resolved_payload,
