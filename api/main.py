@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 
 import uvicorn
 from fastapi import APIRouter, FastAPI
@@ -6,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
 
 from api.dependencies import create_livetiming_signalrcore_client
+from api.services.live_topic_history_service import LiveTopicHistoryService
 from api.core.config import get_settings
 from api.routers.live_timing import router as live_timing_router
 from api.routers.races import router as races_router
@@ -23,10 +25,15 @@ async def lifespan(app: FastAPI):
 
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     app.state.redis = redis
+    history_collector = LiveTopicHistoryService(livetiming_client, redis)
+    collector_task = asyncio.create_task(history_collector.collect_forever())
+    app.state.live_topic_history_collector = collector_task
 
     try:
         yield
     finally:
+        collector_task.cancel()
+        await asyncio.gather(collector_task, return_exceptions=True)
         await redis.aclose()
         await livetiming_client.disconnect()
 

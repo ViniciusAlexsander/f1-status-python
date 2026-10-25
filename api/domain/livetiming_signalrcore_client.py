@@ -20,6 +20,7 @@ class LiveTimingEvent:
     payload: Any
     received_at: datetime
     is_snapshot: bool = False
+    raw_payload: Any = None
 
 
 class LivetimingSignalrcoreClient:
@@ -122,8 +123,12 @@ class LivetimingSignalrcoreClient:
         if connection:
             await asyncio.to_thread(self._stop_hub, connection)
 
-    def subscribe(self, topic: str) -> asyncio.Queue[LiveTimingEvent]:
-        queue: asyncio.Queue[LiveTimingEvent] = asyncio.Queue(maxsize=self.queue_size)
+    def subscribe(
+        self, topic: str, queue_size: int | None = None
+    ) -> asyncio.Queue[LiveTimingEvent]:
+        queue: asyncio.Queue[LiveTimingEvent] = asyncio.Queue(
+            maxsize=queue_size or self.queue_size
+        )
 
         with self._lock:
             self._subscribers[topic].add(queue)
@@ -289,6 +294,7 @@ class LivetimingSignalrcoreClient:
             payload=resolved_payload,
             received_at=datetime.now(timezone.utc),
             is_snapshot=is_snapshot,
+            raw_payload=copy.deepcopy(payload),
         )
 
         with self._lock:

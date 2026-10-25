@@ -9,6 +9,7 @@ from api.domain.livetiming_signalrcore_client import LivetimingSignalrcoreClient
 from api.domain.ocblacktop_client import OcblacktopClient
 from api.services.live_session_service import LiveSessionService
 from api.services.live_topic_stream_service import LiveTopicStreamService
+from api.services.live_topic_history_service import LiveTopicHistoryService
 from api.services.race_service import RaceService
 from api.services.standings_service import StandingsService
 from api.services.timing_service import TimingService
@@ -103,3 +104,10 @@ def get_live_topic_stream_service(
     client: LivetimingSignalrcoreClient = Depends(get_livetiming_signalrcore_client),
 ) -> LiveTopicStreamService:
     return LiveTopicStreamService(client=client)
+
+
+def get_live_topic_history_service(
+    client: LivetimingSignalrcoreClient = Depends(get_livetiming_signalrcore_client),
+    redis: Redis = Depends(get_redis_client),
+) -> LiveTopicHistoryService:
+    return LiveTopicHistoryService(client=client, redis=redis)

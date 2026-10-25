@@ -18,6 +18,6 @@ class LiveTopicStreamService:
 
             while True:
                 event = await queue.get()
-                yield event.payload
+                yield getattr(event, "raw_payload", event.payload)
         finally:
             self.client.unsubscribe(topic, queue)

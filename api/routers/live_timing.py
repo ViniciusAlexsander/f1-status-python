@@ -4,22 +4,28 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from api.dependencies import (
     get_live_current_tyres_service,
     get_live_session_service,
     get_live_topic_stream_service,
+    get_live_topic_history_service,
     get_timing_service,
 )
 from api.services.live_current_tyres_service import LiveCurrentTyresService
 from api.services.live_session_service import LiveSessionService
 from api.services.live_topic_stream_service import LiveTopicStreamService
+from api.services.live_topic_history_service import LiveTopicHistoryService
+from api.domain.live_topics import REQUIRED_SIGNALR_TOPICS
+from api.domain.livetiming_signalrcore_client import LivetimingSignalrcoreClient
+from api.dependencies import get_livetiming_signalrcore_client
 from api.services.timing_service import TimingService
 
 router = APIRouter(prefix="/live-timing", tags=["Live Timing"])
 logger = logging.getLogger(__name__)
+LIVE_TOPIC_NAMES = frozenset(REQUIRED_SIGNALR_TOPICS)
 
 KEEPALIVE_SECONDS = 15
 
@@ -83,6 +89,38 @@ async def stream_race_control_messages(
     return _topic_stream_response(
         "RaceControlMessages", "race_control_messages_update", service
     )
+
+
+@router.get("/topics/{topic}/stream")
+async def stream_topic(
+    topic: str,
+    service: LiveTopicStreamService = Depends(get_live_topic_stream_service),
+) -> StreamingResponse:
+    _validate_topic(topic)
+    return _topic_stream_response(topic, "topic_update", service)
+
+
+@router.get("/topics/status")
+async def get_topics_status(
+    client: LivetimingSignalrcoreClient = Depends(get_livetiming_signalrcore_client),
+) -> dict[str, Any]:
+    return {"connected": client.is_connected, "topics": list(REQUIRED_SIGNALR_TOPICS)}
+
+
+@router.get("/topics/{topic}/history")
+async def get_topic_history(
+    topic: str,
+    limit: int = Query(default=100, ge=1, le=1000),
+    before: str | None = Query(default=None),
+    service: LiveTopicHistoryService = Depends(get_live_topic_history_service),
+) -> dict[str, Any]:
+    _validate_topic(topic)
+    return await service.get_history(topic, limit=limit, before=before)
+
+
+def _validate_topic(topic: str) -> None:
+    if topic not in LIVE_TOPIC_NAMES:
+        raise HTTPException(status_code=404, detail="Unknown live timing topic")
 
 
 def _topic_stream_response(
