@@ -56,12 +56,28 @@ class LiveSessionService:
             "lap": 0,
             "trackStatus": None,
             "sessionStatus": None,
+            "qualifyingPart": None,
         }
 
         if "Series" in payload:
-            for lap_data in normalize_stream_data(payload["Series"]):
+            series_data = normalize_stream_data(payload["Series"])
+            for lap_data in series_data:
                 if "Lap" in lap_data:
                     current_state["lap"] = lap_data["Lap"]
+
+            qualifying_parts = [
+                item
+                for item in series_data
+                if isinstance(item.get("QualifyingPart"), int)
+                and not isinstance(item.get("QualifyingPart"), bool)
+                and item["QualifyingPart"] in (1, 2, 3)
+            ]
+            if qualifying_parts:
+                latest_part = max(
+                    qualifying_parts,
+                    key=lambda item: str(item.get("Utc", "")),
+                )
+                current_state["qualifyingPart"] = latest_part["QualifyingPart"]
 
         if "StatusSeries" in payload:
             for status_data in normalize_stream_data(payload["StatusSeries"]):

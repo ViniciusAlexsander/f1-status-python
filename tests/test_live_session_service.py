@@ -47,7 +47,12 @@ class LiveSessionServiceTest(unittest.IsolatedAsyncioTestCase):
             LiveTimingEvent(
                 topic="SessionData",
                 payload={
-                    "Series": [{"Lap": 12}],
+                    "Series": [
+                        {"Utc": "2026-10-24T20:46:39.767Z", "QualifyingPart": 1},
+                        {"Utc": "2026-10-24T21:23:59.626Z", "QualifyingPart": 2},
+                        {"Utc": "2026-10-24T21:46:00.061Z", "QualifyingPart": 3},
+                        {"Lap": 12},
+                    ],
                     "StatusSeries": [
                         {
                             "TrackStatus": "1",
@@ -68,9 +73,19 @@ class LiveSessionServiceTest(unittest.IsolatedAsyncioTestCase):
                 "lap": 12,
                 "trackStatus": "1",
                 "sessionStatus": "Started",
+                "qualifyingPart": 3,
             },
         )
 
         await stream.aclose()
 
         self.assertTrue(client.unsubscribed)
+
+    def test_parse_session_state_leaves_qualifying_part_empty_when_absent(self) -> None:
+        service = LiveSessionService(client=FakeLiveTimingClient(), cache=FakeCache())
+
+        state = service._parse_session_state(
+            {"Series": [{"Utc": "2026-10-25T19:06:57.934Z", "Lap": 1}]}
+        )
+
+        self.assertIsNone(state["qualifyingPart"])

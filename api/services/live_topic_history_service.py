@@ -66,6 +66,7 @@ class LiveTopicHistoryService:
             "payload": event.raw_payload,
             "receivedAt": event.received_at.isoformat(),
             "isSnapshot": event.is_snapshot,
+            "sessionId": event.session_id,
         }
         return await self.redis.xadd(
             self._history_key(event.topic),

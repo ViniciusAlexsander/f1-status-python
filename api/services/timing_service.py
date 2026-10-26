@@ -1,5 +1,5 @@
 from collections.abc import AsyncGenerator
-from datetime import date, datetime
+from copy import deepcopy
 import json
 from typing import Any
 
@@ -13,31 +13,47 @@ class TimingService:
         self.cache = cache
 
     async def stream_timing_data(self) -> AsyncGenerator[dict[str, Any], None]:
-        today = date.today()
-        cache_key = f"TimingData:{today}"
-
-        cached_event = await self.cache.get_snapshot(cache_key)
-
-        if cached_event is not None:
-            yield cached_event
-
         await self.client.ensure_connected()
         queue = self.client.subscribe("TimingData")
         current_state: dict[str, Any] = {}
-
-        if cached_event is not None:
-            cached_payload = cached_event.get("payload")
-
-            if isinstance(cached_payload, dict):
-                current_state = cached_payload.copy()
+        current_session_id: str | None = None
+        current_cache_key: str | None = None
 
         try:
             while True:
                 event = await queue.get()
                 payload = event.payload
 
+                session_changed = (
+                    event.session_id is not None
+                    and event.session_id != current_session_id
+                )
+                cache_key = (
+                    f"TimingData:{event.received_at.date()}:{event.session_id}"
+                    if event.session_id is not None
+                    else None
+                )
+
+                if cache_key != current_cache_key:
+                    current_session_id = event.session_id
+                    current_cache_key = cache_key
+                    current_state = {}
+                    cached_event = (
+                        await self.cache.get_snapshot(cache_key)
+                        if cache_key is not None
+                        else None
+                    )
+                    if cached_event is not None:
+                        cached_payload = cached_event.get("payload")
+                        if isinstance(cached_payload, dict):
+                            current_state = deepcopy(cached_payload)
+                        yield cached_event
+
                 if isinstance(payload, dict):
-                    self._merge_dict(current_state, payload)
+                    if event.is_snapshot or (session_changed and not current_state):
+                        current_state = deepcopy(payload)
+                    else:
+                        self._merge_dict(current_state, payload)
 
                 event_data = {
                     "topic": event.topic,
@@ -46,7 +62,8 @@ class TimingService:
                     "isSnapshot": event.is_snapshot,
                 }
 
-                await self.cache.save_snapshot(cache_key, event_data)
+                if cache_key is not None:
+                    await self.cache.save_snapshot(cache_key, event_data)
 
                 yield event_data
 

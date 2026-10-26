@@ -21,6 +21,7 @@ class LiveTimingEvent:
     received_at: datetime
     is_snapshot: bool = False
     raw_payload: Any = None
+    session_id: str | None = None
 
 
 class LivetimingSignalrcoreClient:
@@ -56,6 +57,10 @@ class LivetimingSignalrcoreClient:
         self._reconnect_delay = reconnect_initial_seconds
         self._lock = threading.RLock()
         self._topic_state: DefaultDict[str, Any] = defaultdict(dict)
+        self._session_info_state: dict[str, Any] = {}
+        self._session_data_state: dict[str, Any] = {}
+        self._active_session_id: str | None = None
+        self._active_session_source: str | None = None
         self._subscribers: DefaultDict[str, set[asyncio.Queue[LiveTimingEvent]]] = (
             defaultdict(set)
         )
@@ -106,6 +111,10 @@ class LivetimingSignalrcoreClient:
             self.connection = None
             self._connected = False
             self._topic_state.clear()
+            self._session_info_state.clear()
+            self._session_data_state.clear()
+            self._active_session_id = None
+            self._active_session_source = None
 
         reconnect_task = self._reconnect_task
         self._reconnect_task = None
@@ -285,16 +294,40 @@ class LivetimingSignalrcoreClient:
             self._dispatch(topic, payload, is_snapshot=True)
 
     def _dispatch(self, topic: str, payload: Any, is_snapshot: bool) -> None:
+        if topic == "SessionInfo" and isinstance(payload, dict):
+            if is_snapshot or not self._session_info_state:
+                self._session_info_state = copy.deepcopy(payload)
+            else:
+                self._merge_dict(self._session_info_state, payload)
+
+            session_id = self._get_session_id(self._session_info_state)
+            if (
+                session_id
+                and self._active_session_source != "SessionData"
+            ):
+                self._set_active_session(session_id, "SessionInfo")
+
         if topic in self.raw_payload_topics:
             resolved_payload = copy.deepcopy(payload)
         else:
             resolved_payload = self._update_topic_state(topic, payload, is_snapshot)
+
+        if topic == "SessionData" and isinstance(resolved_payload, dict):
+            if is_snapshot or not self._session_data_state:
+                self._session_data_state = copy.deepcopy(resolved_payload)
+            else:
+                self._merge_dict(self._session_data_state, payload)
+            session_id = self._get_session_id_from_data(self._session_data_state)
+            if session_id:
+                self._set_active_session(session_id, "SessionData")
+
         event = LiveTimingEvent(
             topic=topic,
             payload=resolved_payload,
             received_at=datetime.now(timezone.utc),
             is_snapshot=is_snapshot,
             raw_payload=copy.deepcopy(payload),
+            session_id=self._active_session_id,
         )
 
         with self._lock:
@@ -309,6 +342,66 @@ class LivetimingSignalrcoreClient:
 
         for queue in subscribers:
             self._loop.call_soon_threadsafe(self._publish, queue, event)
+
+    def _set_active_session(self, session_id: str, source: str) -> None:
+        if session_id == self._active_session_id:
+            return
+
+        if self._active_session_source and source != self._active_session_source:
+            return
+
+        logger.info("Live timing session changed to %s", session_id)
+        if self._active_session_id is not None:
+            with self._lock:
+                self._topic_state.pop("TimingData", None)
+        self._active_session_id = session_id
+        self._active_session_source = source
+
+    @staticmethod
+    def _get_session_id(session_info: dict[str, Any]) -> str | None:
+        for key in ("Key", "Path", "StartDate"):
+            value = session_info.get(key)
+            if value not in (None, ""):
+                return str(value)
+
+        meeting = session_info.get("Meeting")
+        meeting_key = meeting.get("Key") if isinstance(meeting, dict) else None
+        session_type = session_info.get("Type") or session_info.get("Name")
+        if meeting_key and session_type:
+            return f"{meeting_key}:{session_type}"
+        return None
+
+    @staticmethod
+    def _get_session_id_from_data(session_data: dict[str, Any]) -> str | None:
+        series = session_data.get("Series")
+        status_series = session_data.get("StatusSeries")
+
+        def entries(value: Any) -> list[dict[str, Any]]:
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+            if isinstance(value, dict):
+                return [item for item in value.values() if isinstance(item, dict)]
+            return []
+
+        series_entries = entries(series)
+        status_entries = entries(status_series)
+        session_kind = "Qualifying" if any(
+            "QualifyingPart" in item for item in series_entries
+        ) else "LapSession" if any("Lap" in item for item in series_entries) else None
+
+        started_at = [
+            item.get("Utc")
+            for item in status_entries
+            if item.get("SessionStatus") == "Started" and item.get("Utc")
+        ]
+        if not started_at:
+            started_at = [item.get("Utc") for item in series_entries if item.get("Utc")]
+
+        if not started_at:
+            return None
+
+        first_start = min(str(value) for value in started_at)
+        return f"{session_kind or 'Session'}:{first_start}"
 
     def _update_topic_state(
         self,
