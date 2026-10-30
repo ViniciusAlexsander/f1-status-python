@@ -74,6 +74,9 @@ class LiveSessionServiceTest(unittest.IsolatedAsyncioTestCase):
                 "trackStatus": "1",
                 "sessionStatus": "Started",
                 "qualifyingPart": 3,
+                    "qualifyingPartStartedAt": None,
+                    "qualifyingPartFinishedAt": None,
+                    "qualifyingRedFlagIntervals": [],
             },
         )
 
@@ -89,3 +92,54 @@ class LiveSessionServiceTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsNone(state["qualifyingPart"])
+
+    def test_parse_session_data_anchors_phase_clock_to_started_and_finished(self) -> None:
+        service = LiveSessionService(client=FakeLiveTimingClient(), cache=FakeCache())
+
+        state = service._parse_session_state(
+            {
+                "Series": [
+                    {"Utc": "2026-10-24T20:46:39.767Z", "QualifyingPart": 1},
+                    {"Utc": "2026-10-24T21:23:59.626Z", "QualifyingPart": 2},
+                    {"Utc": "2026-10-24T21:46:00.061Z", "QualifyingPart": 3},
+                ],
+                "StatusSeries": [
+                    {"Utc": "2026-10-24T21:00:00.095Z", "SessionStatus": "Started"},
+                    {"Utc": "2026-10-24T21:18:00.103Z", "SessionStatus": "Finished"},
+                    {"Utc": "2026-10-24T21:24:07.119Z", "SessionStatus": "Inactive"},
+                    {"Utc": "2026-10-24T21:25:00.107Z", "SessionStatus": "Started"},
+                    {"Utc": "2026-10-24T21:40:00.085Z", "SessionStatus": "Finished"},
+                    {"Utc": "2026-10-24T21:46:13.052Z", "SessionStatus": "Inactive"},
+                    {"Utc": "2026-10-24T21:47:00.092Z", "SessionStatus": "Started"},
+                    {"Utc": "2026-10-24T22:00:00.097Z", "SessionStatus": "Finished"},
+                ],
+            }
+        )
+
+        self.assertEqual(state["qualifyingPart"], 3)
+        self.assertEqual(state["qualifyingPartStartedAt"], "2026-10-24T21:47:00.092Z")
+        self.assertEqual(state["qualifyingPartFinishedAt"], "2026-10-24T22:00:00.097Z")
+
+    def test_parse_session_data_tracks_red_flag_pause_intervals(self) -> None:
+        service = LiveSessionService(client=FakeLiveTimingClient(), cache=FakeCache())
+
+        state = service._parse_session_state(
+            {
+                "Series": [{"Utc": "2026-10-24T20:46:39.767Z", "QualifyingPart": 1}],
+                "StatusSeries": [
+                    {"Utc": "2026-10-24T21:00:00.000Z", "SessionStatus": "Started"},
+                    {"Utc": "2026-10-24T21:05:00.000Z", "TrackStatus": "Red"},
+                    {"Utc": "2026-10-24T21:08:00.000Z", "TrackStatus": "AllClear"},
+                ],
+            }
+        )
+
+        self.assertEqual(
+            state["qualifyingRedFlagIntervals"],
+            [
+                {
+                    "startedAt": "2026-10-24T21:05:00.000Z",
+                    "endedAt": "2026-10-24T21:08:00.000Z",
+                }
+            ],
+        )

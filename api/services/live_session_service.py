@@ -57,10 +57,13 @@ class LiveSessionService:
             "trackStatus": None,
             "sessionStatus": None,
             "qualifyingPart": None,
+            "qualifyingPartStartedAt": None,
+            "qualifyingPartFinishedAt": None,
+            "qualifyingRedFlagIntervals": [],
         }
 
         if "Series" in payload:
-            series_data = normalize_stream_data(payload["Series"])
+            series_data = list(normalize_stream_data(payload["Series"]))
             for lap_data in series_data:
                 if "Lap" in lap_data:
                     current_state["lap"] = lap_data["Lap"]
@@ -73,14 +76,83 @@ class LiveSessionService:
                 and item["QualifyingPart"] in (1, 2, 3)
             ]
             if qualifying_parts:
-                latest_part = max(
-                    qualifying_parts,
-                    key=lambda item: str(item.get("Utc", "")),
-                )
+                qualifying_parts.sort(key=lambda item: str(item.get("Utc", "")))
+                latest_part = qualifying_parts[-1]
                 current_state["qualifyingPart"] = latest_part["QualifyingPart"]
 
+                part_started_at = str(latest_part.get("Utc", ""))
+                next_part_at = next(
+                    (
+                        str(item.get("Utc", ""))
+                        for item in qualifying_parts
+                        if str(item.get("Utc", "")) > part_started_at
+                    ),
+                    None,
+                )
+
+                status_series = list(
+                    normalize_stream_data(payload.get("StatusSeries"))
+                )
+                status_series.sort(key=lambda item: str(item.get("Utc", "")))
+                starts = [
+                    item
+                    for item in status_series
+                    if item.get("SessionStatus") == "Started"
+                    and str(item.get("Utc", "")) >= part_started_at
+                    and (
+                        next_part_at is None
+                        or str(item.get("Utc", "")) < next_part_at
+                    )
+                ]
+
+                if starts:
+                    started_at = str(starts[0].get("Utc"))
+                    current_state["qualifyingPartStartedAt"] = started_at
+                    finished = next(
+                        (
+                            item
+                            for item in status_series
+                            if item.get("SessionStatus") == "Finished"
+                            and str(item.get("Utc", "")) > started_at
+                            and (
+                                next_part_at is None
+                                or str(item.get("Utc", "")) < next_part_at
+                            )
+                        ),
+                        None,
+                    )
+                    if finished:
+                        current_state["qualifyingPartFinishedAt"] = str(
+                            finished.get("Utc")
+                        )
+
+                    red_started_at: str | None = None
+                    red_intervals: list[dict[str, str | None]] = []
+                    for item in status_series:
+                        item_utc = str(item.get("Utc", ""))
+                        if item_utc < started_at:
+                            continue
+                        if item.get("TrackStatus") == "Red":
+                            if red_started_at is None:
+                                red_started_at = item_utc
+                        elif red_started_at is not None:
+                            red_intervals.append(
+                                {"startedAt": red_started_at, "endedAt": item_utc}
+                            )
+                            red_started_at = None
+
+                    if red_started_at is not None:
+                        red_intervals.append(
+                            {"startedAt": red_started_at, "endedAt": None}
+                        )
+                    current_state["qualifyingRedFlagIntervals"] = red_intervals
+
         if "StatusSeries" in payload:
-            for status_data in normalize_stream_data(payload["StatusSeries"]):
+            status_series = sorted(
+                normalize_stream_data(payload["StatusSeries"]),
+                key=lambda item: str(item.get("Utc", "")),
+            )
+            for status_data in status_series:
                 if "TrackStatus" in status_data:
                     current_state["trackStatus"] = status_data["TrackStatus"]
 
