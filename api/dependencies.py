@@ -102,8 +102,9 @@ def get_live_current_tyres_service(
 
 def get_live_topic_stream_service(
     client: LivetimingSignalrcoreClient = Depends(get_livetiming_signalrcore_client),
+    cache: LiveTimingCache = Depends(get_live_timing_cache),
 ) -> LiveTopicStreamService:
-    return LiveTopicStreamService(client=client)
+    return LiveTopicStreamService(client=client, cache=cache)
 
 
 def get_live_topic_history_service(

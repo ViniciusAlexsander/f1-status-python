@@ -15,6 +15,7 @@ class LiveTopicRouterTest(unittest.IsolatedAsyncioTestCase):
             {
                 "/live-timing/session-info",
                 "/live-timing/extrapolated-clock",
+                "/live-timing/conditions",
                 "/live-timing/weather-data",
                 "/live-timing/race-control-messages",
             }.issubset(paths)
@@ -44,6 +45,21 @@ class LiveTopicRouterTest(unittest.IsolatedAsyncioTestCase):
             [
                 f"event: topic_update\ndata: {json.dumps(value)}\n\n"
                 for value in ({"x": 1}, [1, "two"], "text", 9, None)
+            ],
+        )
+
+    async def test_conditions_sse_sends_named_weather_and_track_events(self) -> None:
+        async def source():
+            yield "track_status_update", {"Status": "1"}
+            yield "weather_data_update", {"AirTemp": "23.2"}
+
+        events = [event async for event in live_timing._sse_topic_events(source())]
+
+        self.assertEqual(
+            events,
+            [
+                'event: track_status_update\ndata: {"Status": "1"}\n\n',
+                'event: weather_data_update\ndata: {"AirTemp": "23.2"}\n\n',
             ],
         )
 

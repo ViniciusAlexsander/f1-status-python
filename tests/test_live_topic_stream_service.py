@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from api.domain.livetiming_signalrcore_client import LivetimingSignalrcoreClient
 from api.domain.live_topics import RAW_FORWARD_SIGNALR_TOPICS
 from api.services.live_topic_stream_service import LiveTopicStreamService
+from redis.exceptions import RedisError
 
 
 class FakeLiveTimingClient:
@@ -25,6 +26,19 @@ class FakeLiveTimingClient:
         self.unsubscribed.append((topic, queue))
 
 
+class FakeCache:
+    def __init__(self, snapshots: dict[str, dict] | None = None) -> None:
+        self.snapshots = snapshots or {}
+
+    async def get_snapshot(self, topic: str) -> dict | None:
+        return self.snapshots.get(topic)
+
+
+class UnavailableCache:
+    async def get_snapshot(self, topic: str) -> dict | None:
+        raise RedisError("Redis unavailable")
+
+
 class LiveTopicStreamServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_forwards_any_json_payload_and_unsubscribes(self) -> None:
         payloads = [
@@ -38,7 +52,7 @@ class LiveTopicStreamServiceTest(unittest.IsolatedAsyncioTestCase):
         for topic in RAW_FORWARD_SIGNALR_TOPICS:
             with self.subTest(topic=topic):
                 client = FakeLiveTimingClient()
-                service = LiveTopicStreamService(client)
+                service = LiveTopicStreamService(client, FakeCache())
                 stream = service.stream_topic(topic)
 
                 for payload in payloads:
@@ -50,6 +64,145 @@ class LiveTopicStreamServiceTest(unittest.IsolatedAsyncioTestCase):
                 await stream.aclose()
                 self.assertTrue(client.connected)
                 self.assertEqual(client.unsubscribed, [(topic, client.queues[topic])])
+
+    async def test_track_status_stream_starts_with_cached_latest_payload(self) -> None:
+        client = FakeLiveTimingClient()
+        service = LiveTopicStreamService(
+            client,
+            FakeCache(
+                {"TrackStatus": {"payload": {"Status": "2", "Message": "Yellow"}}}
+            ),
+        )
+        stream = service.stream_topic("TrackStatus")
+
+        self.assertEqual(
+            await asyncio.wait_for(stream.__anext__(), 1),
+            {"Status": "2", "Message": "Yellow"},
+        )
+
+        next_item = asyncio.create_task(stream.__anext__())
+        await asyncio.sleep(0)
+        await client.queues["TrackStatus"].put(
+            SimpleNamespace(payload={"Status": "1", "Message": "AllClear"})
+        )
+        self.assertEqual(
+            await asyncio.wait_for(next_item, 1),
+            {"Status": "1", "Message": "AllClear"},
+        )
+        await stream.aclose()
+
+    async def test_weather_stream_continues_when_redis_snapshot_is_unavailable(self) -> None:
+        client = FakeLiveTimingClient()
+        service = LiveTopicStreamService(client, UnavailableCache())
+        stream = service.stream_topic("WeatherData")
+        next_item = asyncio.create_task(stream.__anext__())
+        await asyncio.sleep(0)
+        await client.queues["WeatherData"].put(
+            SimpleNamespace(payload={"AirTemp": 25})
+        )
+
+        self.assertEqual(await asyncio.wait_for(next_item, 1), {"AirTemp": 25})
+        await stream.aclose()
+
+    async def test_conditions_stream_shares_weather_and_track_status(self) -> None:
+        client = FakeLiveTimingClient()
+        service = LiveTopicStreamService(
+            client,
+            FakeCache(
+                {
+                    "TrackStatus": {"payload": {"Status": "1"}},
+                    "WeatherData": {"payload": {"AirTemp": "23.2"}},
+                    "ExtrapolatedClock": {
+                        "payload": {"Remaining": "00:20:00"}
+                    },
+                    "RaceControlMessages": {
+                        "payload": {
+                            "Messages": [{"Message": "Green", "Utc": "t1"}]
+                        }
+                    },
+                }
+            ),
+        )
+        stream = service.stream_conditions()
+
+        self.assertEqual(
+            await asyncio.wait_for(stream.__anext__(), 1),
+            ("track_status_update", {"Status": "1"}),
+        )
+        self.assertEqual(
+            await asyncio.wait_for(stream.__anext__(), 1),
+            ("weather_data_update", {"AirTemp": "23.2"}),
+        )
+        self.assertEqual(
+            await asyncio.wait_for(stream.__anext__(), 1),
+            ("extrapolated_clock_update", {"Remaining": "00:20:00"}),
+        )
+        self.assertEqual(
+            await asyncio.wait_for(stream.__anext__(), 1),
+            (
+                "race_control_messages_update",
+                {"Messages": [{"Message": "Green", "Utc": "t1"}]},
+            ),
+        )
+
+        next_event = asyncio.create_task(stream.__anext__())
+        await asyncio.sleep(0)
+        await client.queues["WeatherData"].put(
+            SimpleNamespace(raw_payload={"AirTemp": "23.4"}, payload={})
+        )
+        self.assertEqual(
+            await asyncio.wait_for(next_event, 1),
+            ("weather_data_update", {"AirTemp": "23.4"}),
+        )
+
+        next_event = asyncio.create_task(stream.__anext__())
+        await asyncio.sleep(0)
+        await client.queues["ExtrapolatedClock"].put(
+            SimpleNamespace(raw_payload={"Remaining": "00:12:34"}, payload={})
+        )
+        self.assertEqual(
+            await asyncio.wait_for(next_event, 1),
+            ("extrapolated_clock_update", {"Remaining": "00:12:34"}),
+        )
+
+        next_event = asyncio.create_task(stream.__anext__())
+        await asyncio.sleep(0)
+        await client.queues["RaceControlMessages"].put(
+            SimpleNamespace(
+                raw_payload={"Messages": [{"Message": "Yellow flag"}]},
+                payload={},
+            )
+        )
+        self.assertEqual(
+            await asyncio.wait_for(next_event, 1),
+            (
+                "race_control_messages_update",
+                {"Messages": [{"Message": "Yellow flag"}]},
+            ),
+        )
+
+        await stream.aclose()
+        self.assertEqual(
+            client.unsubscribed,
+            [
+                ("TrackStatus", client.queues["TrackStatus"]),
+                ("WeatherData", client.queues["WeatherData"]),
+                ("ExtrapolatedClock", client.queues["ExtrapolatedClock"]),
+                ("RaceControlMessages", client.queues["RaceControlMessages"]),
+            ],
+        )
+
+    async def test_weather_stream_starts_with_cached_latest_payload(self) -> None:
+        client = FakeLiveTimingClient()
+        weather = {"AirTemp": 25, "TrackTemp": 37}
+        service = LiveTopicStreamService(
+            client,
+            FakeCache({"WeatherData": {"payload": weather}}),
+        )
+        stream = service.stream_topic("WeatherData")
+
+        self.assertEqual(await asyncio.wait_for(stream.__anext__(), 1), weather)
+        await stream.aclose()
 
     async def test_signalr_client_preserves_raw_topic_updates(self) -> None:
         client = LivetimingSignalrcoreClient(

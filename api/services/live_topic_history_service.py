@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 import json
 import logging
 from typing import Any
@@ -10,15 +11,26 @@ from api.domain.livetiming_signalrcore_client import (
     LiveTimingEvent,
     LivetimingSignalrcoreClient,
 )
+from api.services.live_timing_cache import LiveTimingCache
 
 logger = logging.getLogger(__name__)
 HISTORY_QUEUE_SIZE = 10000
+SNAPSHOT_TOPICS = frozenset(
+    {
+        "ExtrapolatedClock",
+        "RaceControlMessages",
+        "TrackStatus",
+        "TyreStintSeries",
+        "WeatherData",
+    }
+)
 
 
 class LiveTopicHistoryService:
     def __init__(self, client: LivetimingSignalrcoreClient, redis: Redis) -> None:
         self.client = client
         self.redis = redis
+        self.cache = LiveTimingCache(redis)
 
     async def collect_forever(self) -> None:
         queues = {
@@ -68,10 +80,98 @@ class LiveTopicHistoryService:
             "isSnapshot": event.is_snapshot,
             "sessionId": event.session_id,
         }
+        if event.topic in SNAPSHOT_TOPICS:
+            await self._save_latest_snapshot(event, envelope)
+
         return await self.redis.xadd(
             self._history_key(event.topic),
             {"event": json.dumps(envelope, separators=(",", ":"))},
         )
+
+    async def _save_latest_snapshot(
+        self,
+        event: LiveTimingEvent,
+        envelope: dict[str, Any],
+    ) -> None:
+        payload = envelope["payload"]
+        previous = await self.cache.get_snapshot(event.topic)
+        previous_payload = previous.get("payload") if previous else None
+
+        if (
+            event.is_snapshot
+            or (isinstance(payload, dict) and payload.get("_kf") is True)
+            or previous_payload is None
+        ):
+            current_payload = deepcopy(payload)
+        elif event.topic == "RaceControlMessages":
+            current_payload = self._merge_race_control_messages(
+                previous_payload, payload
+            )
+        elif isinstance(previous_payload, dict) and isinstance(payload, dict):
+            current_payload = deepcopy(previous_payload)
+            self._merge_dict(current_payload, payload)
+        else:
+            current_payload = deepcopy(payload)
+
+        await self.cache.save_snapshot(
+            event.topic,
+            {**envelope, "payload": current_payload},
+        )
+
+    @staticmethod
+    def _merge_race_control_messages(
+        current: Any,
+        update: Any,
+    ) -> Any:
+        if not isinstance(current, dict) or not isinstance(update, dict):
+            return deepcopy(update)
+
+        merged = deepcopy(current)
+        current_messages = current.get("Messages")
+        update_messages = update.get("Messages")
+        if not isinstance(current_messages, list) or not isinstance(
+            update_messages, list
+        ):
+            LiveTopicHistoryService._merge_dict(merged, update)
+            return merged
+
+        messages_by_id = {
+            LiveTopicHistoryService._race_control_message_id(message): message
+            for message in current_messages
+            if isinstance(message, dict)
+        }
+        for message in update_messages:
+            if isinstance(message, dict):
+                messages_by_id[
+                    LiveTopicHistoryService._race_control_message_id(message)
+                ] = message
+
+        metadata_update = {
+            key: value for key, value in update.items() if key != "Messages"
+        }
+        LiveTopicHistoryService._merge_dict(merged, metadata_update)
+        merged["Messages"] = sorted(
+            messages_by_id.values(),
+            key=lambda message: str(message.get("Utc", "")),
+        )
+        return merged
+
+    @staticmethod
+    def _race_control_message_id(message: dict[str, Any]) -> str:
+        return f"{message.get('Utc', '')}|{message.get('Message', '')}"
+
+    @classmethod
+    def _merge_dict(
+        cls,
+        current: dict[str, Any],
+        update: dict[str, Any],
+    ) -> None:
+        for key, value in update.items():
+            existing = current.get(key)
+            if isinstance(existing, dict) and isinstance(value, dict):
+                cls._merge_dict(existing, value)
+            else:
+                current[key] = deepcopy(value)
 
     async def get_history(
         self, topic: str, limit: int = 100, before: str | None = None

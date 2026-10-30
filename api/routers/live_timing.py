@@ -134,6 +134,37 @@ def _topic_stream_response(
     )
 
 
+@router.get("/conditions")
+async def stream_track_conditions(
+    service: LiveTopicStreamService = Depends(get_live_topic_stream_service),
+) -> StreamingResponse:
+    return StreamingResponse(
+        _sse_topic_events(service.stream_conditions()),
+        media_type="text/event-stream",
+    )
+
+
+async def _sse_topic_events(
+    source: AsyncGenerator[tuple[str, Any], None],
+) -> AsyncGenerator[str, None]:
+    try:
+        async for event_name, payload in source:
+            if not event_name:
+                yield ": keepalive\n\n"
+                continue
+            yield f"event: {event_name}\ndata: {json.dumps(payload)}\n\n"
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.exception("Live timing conditions SSE stream failed")
+        yield (
+            "event: live_timing_error\n"
+            f"data: {json.dumps({'detail': str(exc)})}\n\n"
+        )
+    finally:
+        await source.aclose()
+
+
 async def _sse_events(
     event_name: str,
     source: AsyncGenerator[Any, None],
