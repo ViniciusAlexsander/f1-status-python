@@ -81,7 +81,9 @@ class LivetimingSignalrcoreClient:
             raise RuntimeError("SignalRCore client is stopping")
 
         async with self._connect_lock:
-            if self._connected:
+            if self._connected and (
+                self._ready is None or self._ready.done()
+            ):
                 return
 
             self._loop = asyncio.get_running_loop()
@@ -223,7 +225,10 @@ class LivetimingSignalrcoreClient:
         connection.send(
             "Subscribe",
             [self.topics],
-            on_invocation=self._on_subscribe_response,
+            on_invocation=lambda message: self._on_subscribe_response(
+                message,
+                connection,
+            ),
         )
 
         with self._lock:
@@ -232,8 +237,6 @@ class LivetimingSignalrcoreClient:
 
             self._connected = True
             self._reconnect_delay = self.reconnect_initial_seconds
-
-        self._set_ready_result()
 
     def _on_close(self, connection: Any) -> None:
         with self._lock:
@@ -287,7 +290,17 @@ class LivetimingSignalrcoreClient:
 
         self._dispatch(topic, payload, is_snapshot=False)
 
-    def _on_subscribe_response(self, message: Any) -> None:
+    def _on_subscribe_response(
+        self,
+        message: Any,
+        connection: Any | None = None,
+    ) -> None:
+        if connection is not None:
+            with self._lock:
+                if self.connection is not connection or not self._connected:
+                    logger.warning("Ignoring subscribe response for a stale connection")
+                    return
+
         result = getattr(message, "result", None)
 
         if not isinstance(result, dict):
@@ -296,6 +309,8 @@ class LivetimingSignalrcoreClient:
 
         for topic, payload in result.items():
             self._dispatch(topic, payload, is_snapshot=True)
+
+        self._set_ready_result()
 
     def _dispatch(self, topic: str, payload: Any, is_snapshot: bool) -> None:
         if topic == "SessionInfo" and isinstance(payload, dict):

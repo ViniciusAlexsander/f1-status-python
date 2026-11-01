@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from api.domain.livetiming_signalrcore_client import LiveTimingEvent
 from api.services.timing_service import TimingService
@@ -12,9 +12,22 @@ class FakeLiveTimingClient:
         self.connected = False
         self.unsubscribed = False
         self.active_session_id: str | None = None
+        self.topic: str | None = None
+        self.snapshot_on_connect: dict | None = None
 
     async def ensure_connected(self) -> None:
         self.connected = True
+        if self.topic != "TimingData":
+            raise AssertionError("TimingData queue must be subscribed before connect")
+        if self.snapshot_on_connect is not None:
+            await self.queue.put(
+                LiveTimingEvent(
+                    topic="TimingData",
+                    payload=self.snapshot_on_connect,
+                    received_at=datetime.now(timezone.utc),
+                    is_snapshot=True,
+                )
+            )
 
     def subscribe(self, topic: str) -> asyncio.Queue[LiveTimingEvent]:
         self.topic = topic
@@ -42,9 +55,8 @@ class FakeCache:
 
 
 class TimingServiceTest(unittest.IsolatedAsyncioTestCase):
-    async def test_stream_yields_current_session_cache_before_live_updates(self) -> None:
-        session_id = "Qualifying:2026-10-30T18:00:00Z"
-        cache_key = f"TimingData:{datetime.now(timezone.utc).date()}:{session_id}"
+    async def test_stream_yields_daily_cache_before_live_updates(self) -> None:
+        cache_key = f"TimingData:{date.today()}"
         cached_event = {
             "topic": "TimingData",
             "payload": {"Lines": {"63": {"RacingNumber": "63"}}},
@@ -52,7 +64,7 @@ class TimingServiceTest(unittest.IsolatedAsyncioTestCase):
             "isSnapshot": True,
         }
         client = FakeLiveTimingClient()
-        client.active_session_id = session_id
+        client.snapshot_on_connect = {"Lines": {"63": {"NumberOfLaps": 8}}}
         cache = FakeCache()
         cache.snapshots[cache_key] = cached_event
         service = TimingService(client=client, cache=cache)
@@ -61,19 +73,11 @@ class TimingServiceTest(unittest.IsolatedAsyncioTestCase):
         first = await asyncio.wait_for(stream.__anext__(), timeout=1)
 
         self.assertEqual(first, cached_event)
-        self.assertTrue(client.connected)
+        self.assertFalse(client.connected)
         self.assertEqual(client.topic, "TimingData")
-
-        await client.queue.put(
-            LiveTimingEvent(
-                topic="TimingData",
-                payload={"Lines": {"63": {"NumberOfLaps": 8}}},
-                received_at=datetime.now(timezone.utc),
-                session_id=session_id,
-            )
-        )
         second = await asyncio.wait_for(stream.__anext__(), timeout=1)
 
+        self.assertTrue(client.connected)
         self.assertEqual(
             second["payload"]["Lines"]["63"],
             {"RacingNumber": "63", "NumberOfLaps": 8},

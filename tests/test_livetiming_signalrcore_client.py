@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import unittest
 from types import SimpleNamespace
 
@@ -138,10 +139,14 @@ class LivetimingSignalrcoreClientTest(unittest.IsolatedAsyncioTestCase):
         client = self.create_client()
         calls = 0
         subscribed = []
+        subscribe_response = []
+        subscribe_sent = threading.Event()
 
         class Connection:
             def send(self, method, args, on_invocation=None):
                 subscribed.append((method, args, self))
+                subscribe_response.append(on_invocation)
+                subscribe_sent.set()
 
         def connect_sync() -> None:
             nonlocal calls
@@ -152,9 +157,36 @@ class LivetimingSignalrcoreClientTest(unittest.IsolatedAsyncioTestCase):
 
         client._connect_sync = connect_sync
 
+        first_connect = asyncio.create_task(client.ensure_connected())
+        second_connect = asyncio.create_task(client.ensure_connected())
+        await asyncio.wait_for(asyncio.to_thread(subscribe_sent.wait), timeout=1)
+        await asyncio.sleep(0)
+
+        self.assertFalse(first_connect.done())
+        self.assertFalse(second_connect.done())
+        self.assertIsNone(client.active_session_id)
+        late_connect = asyncio.create_task(client.ensure_connected())
+        await asyncio.sleep(0)
+        self.assertFalse(late_connect.done())
+
+        subscribe_response[0](
+            SimpleNamespace(
+                result={
+                    "SessionInfo": {
+                        "Key": "Qualifying:2026-10-30T18:00:00Z",
+                    }
+                }
+            )
+        )
         await asyncio.gather(
-            client.ensure_connected(),
-            client.ensure_connected(),
+            first_connect,
+            second_connect,
+            late_connect,
+        )
+
+        self.assertEqual(
+            client.active_session_id,
+            "Qualifying:2026-10-30T18:00:00Z",
         )
 
         self.assertEqual(calls, 1)
