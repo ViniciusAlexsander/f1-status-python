@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
 from copy import deepcopy
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from api.domain.livetiming_signalrcore_client import LivetimingSignalrcoreClient
@@ -13,13 +14,27 @@ class TimingService:
         self.cache = cache
 
     async def stream_timing_data(self) -> AsyncGenerator[dict[str, Any], None]:
-        await self.client.ensure_connected()
         queue = self.client.subscribe("TimingData")
         current_state: dict[str, Any] = {}
         current_session_id: str | None = None
         current_cache_key: str | None = None
 
         try:
+            await self.client.ensure_connected()
+
+            current_session_id = self.client.active_session_id
+            if current_session_id is not None:
+                current_cache_key = (
+                    f"TimingData:{datetime.now(timezone.utc).date()}:"
+                    f"{current_session_id}"
+                )
+                cached_event = await self.cache.get_snapshot(current_cache_key)
+                if cached_event is not None:
+                    cached_payload = cached_event.get("payload")
+                    if isinstance(cached_payload, dict):
+                        current_state = deepcopy(cached_payload)
+                    yield cached_event
+
             while True:
                 event = await queue.get()
                 payload = event.payload

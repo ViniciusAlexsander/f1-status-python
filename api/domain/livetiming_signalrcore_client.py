@@ -69,6 +69,10 @@ class LivetimingSignalrcoreClient:
     def is_connected(self) -> bool:
         return self._connected
 
+    @property
+    def active_session_id(self) -> str | None:
+        return self._active_session_id
+
     async def connect(self) -> None:
         await self.ensure_connected()
 
