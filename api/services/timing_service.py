@@ -24,6 +24,17 @@ class TimingService:
             cached_event = await self.cache.get_snapshot(cache_key)
 
             if cached_event is not None:
+                cached_event = deepcopy(cached_event)
+                cached_payload = cached_event.get("payload")
+                lines = (
+                    cached_payload.get("Lines")
+                    if isinstance(cached_payload, dict)
+                    else None
+                )
+                if isinstance(lines, dict):
+                    for line in lines.values():
+                        if isinstance(line, dict):
+                            line.pop("NumberOfPitStops", None)
                 yield cached_event
 
             await self.client.ensure_connected()
@@ -40,7 +51,10 @@ class TimingService:
                 payload = event.payload
 
                 if isinstance(payload, dict):
-                    self._merge_dict(current_state, payload)
+                    if event.is_snapshot:
+                        current_state = deepcopy(payload)
+                    else:
+                        self._merge_dict(current_state, payload)
 
                 event_data = {
                     "topic": event.topic,

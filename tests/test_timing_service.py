@@ -59,12 +59,27 @@ class TimingServiceTest(unittest.IsolatedAsyncioTestCase):
         cache_key = f"TimingData:{date.today()}"
         cached_event = {
             "topic": "TimingData",
-            "payload": {"Lines": {"63": {"RacingNumber": "63"}}},
+            "payload": {
+                "Lines": {
+                    "63": {
+                        "RacingNumber": "63",
+                        "NumberOfPitStops": 5,
+                    }
+                }
+            },
             "receivedAt": datetime.now(timezone.utc).isoformat(),
             "isSnapshot": True,
         }
         client = FakeLiveTimingClient()
-        client.snapshot_on_connect = {"Lines": {"63": {"NumberOfLaps": 8}}}
+        client.snapshot_on_connect = {
+            "Lines": {
+                "63": {
+                    "RacingNumber": "63",
+                    "NumberOfLaps": 8,
+                    "NumberOfPitStops": 1,
+                }
+            }
+        }
         cache = FakeCache()
         cache.snapshots[cache_key] = cached_event
         service = TimingService(client=client, cache=cache)
@@ -72,7 +87,14 @@ class TimingServiceTest(unittest.IsolatedAsyncioTestCase):
 
         first = await asyncio.wait_for(stream.__anext__(), timeout=1)
 
-        self.assertEqual(first, cached_event)
+        self.assertNotIn(
+            "NumberOfPitStops",
+            first["payload"]["Lines"]["63"],
+        )
+        self.assertEqual(
+            cache.snapshots[cache_key]["payload"]["Lines"]["63"]["NumberOfPitStops"],
+            5,
+        )
         self.assertFalse(client.connected)
         self.assertEqual(client.topic, "TimingData")
         second = await asyncio.wait_for(stream.__anext__(), timeout=1)
@@ -80,7 +102,11 @@ class TimingServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(client.connected)
         self.assertEqual(
             second["payload"]["Lines"]["63"],
-            {"RacingNumber": "63", "NumberOfLaps": 8},
+            {
+                "RacingNumber": "63",
+                "NumberOfLaps": 8,
+                "NumberOfPitStops": 1,
+            },
         )
 
         await stream.aclose()

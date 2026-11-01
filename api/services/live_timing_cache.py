@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 class LiveTimingCache:
     TIMING_TOPIC = "TimingData"
     SESSION_TOPIC = "SessionData"
+    TIMING_SNAPSHOT_TTL_SECONDS = 3 * 60 * 60
 
     def __init__(self, redis: Redis) -> None:
         self.redis = redis
@@ -26,7 +27,15 @@ class LiveTimingCache:
     async def save_snapshot(self, topic: str, data: dict[str, Any]) -> None:
         encoded = json.dumps(data)
 
-        await self.redis.set(self._snapshot_key(topic), encoded)
+        snapshot_key = self._snapshot_key(topic)
+        if self._daily_timing_cache_date(topic) is not None:
+            await self.redis.set(
+                snapshot_key,
+                encoded,
+                ex=self.TIMING_SNAPSHOT_TTL_SECONDS,
+            )
+        else:
+            await self.redis.set(snapshot_key, encoded)
         await self.redis.publish(self._updates_channel(topic), encoded)
 
     async def get_snapshot(self, topic: str) -> dict[str, Any] | None:
@@ -42,6 +51,14 @@ class LiveTimingCache:
                 topic,
                 cache_date,
             )
+
+        if self._daily_timing_cache_date(topic) is not None:
+            ttl = await self.redis.ttl(snapshot_key)
+            if ttl == -1:
+                await self.redis.expire(
+                    snapshot_key,
+                    self.TIMING_SNAPSHOT_TTL_SECONDS,
+                )
 
         if isinstance(value, bytes):
             value = value.decode("utf-8")
@@ -66,9 +83,11 @@ class LiveTimingCache:
         prefix = f"{self._snapshot_key(daily_topic)}:"
         latest_snapshot: dict[str, Any] | None = None
         latest_timestamp: datetime | None = None
+        legacy_keys: list[str] = []
 
         async for raw_key in self.redis.scan_iter(match=f"{prefix}*"):
             key = raw_key.decode("utf-8") if isinstance(raw_key, bytes) else raw_key
+            legacy_keys.append(key)
             value = await self.redis.get(key)
             if value is None:
                 continue
@@ -102,7 +121,10 @@ class LiveTimingCache:
             await self.redis.set(
                 self._snapshot_key(daily_topic),
                 json.dumps(latest_snapshot),
+                ex=self.TIMING_SNAPSHOT_TTL_SECONDS,
             )
+            for key in legacy_keys:
+                await self.redis.expire(key, self.TIMING_SNAPSHOT_TTL_SECONDS)
             logger.info(
                 "Migrated legacy TimingData cache to daily key for %s",
                 cache_date,

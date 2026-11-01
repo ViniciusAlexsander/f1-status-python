@@ -9,12 +9,22 @@ from api.services.live_timing_cache import LiveTimingCache
 class FakeRedis:
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
+        self.expirations: dict[str, int | None] = {}
+        self.expire_calls: dict[str, int] = {}
 
     async def get(self, key: str) -> str | None:
         return self.values.get(key)
 
-    async def set(self, key: str, value: str) -> None:
+    async def set(self, key: str, value: str, ex: int | None = None) -> None:
         self.values[key] = value
+        self.expirations[key] = ex
+
+    async def ttl(self, key: str) -> int:
+        return -1 if key in self.values and self.expirations.get(key) is None else 0
+
+    async def expire(self, key: str, seconds: int) -> None:
+        self.expire_calls[key] = seconds
+        self.expirations[key] = seconds
 
     async def publish(self, channel: str, value: str) -> None:
         pass
@@ -48,6 +58,21 @@ class LiveTimingCacheTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, latest_snapshot)
         self.assertEqual(json.loads(redis.values[daily_key]), latest_snapshot)
+        self.assertEqual(
+            redis.expirations[daily_key],
+            LiveTimingCache.TIMING_SNAPSHOT_TTL_SECONDS,
+        )
+        self.assertEqual(
+            redis.expire_calls,
+            {
+                cache._snapshot_key(
+                    old_topic
+                ): LiveTimingCache.TIMING_SNAPSHOT_TTL_SECONDS,
+                cache._snapshot_key(
+                    latest_topic
+                ): LiveTimingCache.TIMING_SNAPSHOT_TTL_SECONDS,
+            },
+        )
 
     async def test_get_snapshot_ignores_legacy_cache_from_another_day(self) -> None:
         redis = FakeRedis()
@@ -59,3 +84,35 @@ class LiveTimingCacheTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsNone(await cache.get_snapshot(f"TimingData:{cache_date}"))
+
+    async def test_get_snapshot_adds_expiry_to_existing_daily_cache(self) -> None:
+        redis = FakeRedis()
+        cache = LiveTimingCache(redis)
+        topic = "TimingData:2026-11-01"
+        snapshot_key = cache._snapshot_key(topic)
+        snapshot = {"payload": {}}
+        redis.values[snapshot_key] = json.dumps(snapshot)
+
+        self.assertEqual(await cache.get_snapshot(topic), snapshot)
+        self.assertEqual(
+            redis.expire_calls[snapshot_key],
+            LiveTimingCache.TIMING_SNAPSHOT_TTL_SECONDS,
+        )
+
+    async def test_save_snapshot_sets_expiry_only_on_daily_timing_cache(self) -> None:
+        redis = FakeRedis()
+        cache = LiveTimingCache(redis)
+
+        await cache.save_snapshot(
+            "TimingData:2026-11-01",
+            {"payload": {}},
+        )
+        await cache.save_snapshot("SessionData:2026-11-01", {"payload": {}})
+
+        self.assertEqual(
+            redis.expirations[cache._snapshot_key("TimingData:2026-11-01")],
+            LiveTimingCache.TIMING_SNAPSHOT_TTL_SECONDS,
+        )
+        self.assertIsNone(
+            redis.expirations[cache._snapshot_key("SessionData:2026-11-01")]
+        )
