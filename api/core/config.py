@@ -13,7 +13,7 @@ API_DIR = Path(__file__).resolve().parents[1]
 class Settings(BaseSettings):
     ocblacktop_api_base_url: str = "https://api.ocblacktop.com/v1"
     ocblacktop_api_key: str
-    cors_allow_origins: str = "http://localhost:5173"
+    cors_allow_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     formula1_subscription_token: str | None = None
     livetiming_auth_file: Path | None = None
     livetiming_signalr_connection_url: str = (

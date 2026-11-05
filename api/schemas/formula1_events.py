@@ -4,6 +4,9 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from api.schemas.weather import RaceForecast, WeatherSnapshot
+
+
 class Country(BaseModel):
     name: str
     twoCode: str | None
@@ -24,6 +27,7 @@ class ScheduleItem(BaseModel):
     startTime: datetime  | None
     endTime: datetime | None
     status: str
+    weather: WeatherSnapshot | None = None
 
 
 class Race(BaseModel):
@@ -35,6 +39,7 @@ class Race(BaseModel):
     location: Location
     sportId: str
     schedule: list[ScheduleItem]
+    forecast: RaceForecast | None = None
 
 
 class PaginationMeta(BaseModel):
