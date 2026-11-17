@@ -15,6 +15,7 @@ from api.services.live_timing_cache import LiveTimingCache
 
 logger = logging.getLogger(__name__)
 HISTORY_QUEUE_SIZE = 10000
+SKIP_HISTORY_TOPICS = frozenset({"Position.z", "CarData.z"})
 SNAPSHOT_TOPICS = frozenset(
     {
         "ExtrapolatedClock",
@@ -36,6 +37,7 @@ class LiveTopicHistoryService:
         queues = {
             topic: self.client.subscribe(topic, queue_size=HISTORY_QUEUE_SIZE)
             for topic in REQUIRED_SIGNALR_TOPICS
+            if topic not in SKIP_HISTORY_TOPICS
         }
         retry_delay = 2
 
@@ -73,6 +75,9 @@ class LiveTopicHistoryService:
                     retry_delay = min(retry_delay * 2, 30)
 
     async def save_event(self, event: LiveTimingEvent) -> str:
+        if event.topic in SKIP_HISTORY_TOPICS:
+            return ""
+
         envelope = {
             "topic": event.topic,
             "payload": event.raw_payload,

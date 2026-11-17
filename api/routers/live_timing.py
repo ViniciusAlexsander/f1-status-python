@@ -134,6 +134,16 @@ def _topic_stream_response(
     )
 
 
+@router.get("/position")
+async def stream_position(
+    service: LiveTopicStreamService = Depends(get_live_topic_stream_service),
+) -> StreamingResponse:
+    return StreamingResponse(
+        _sse_events("position_update", service.stream_position()),
+        media_type="text/event-stream",
+    )
+
+
 @router.get("/conditions")
 async def stream_track_conditions(
     service: LiveTopicStreamService = Depends(get_live_topic_stream_service),

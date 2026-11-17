@@ -4,12 +4,13 @@ import logging
 from typing import Any
 
 from api.domain.livetiming_signalrcore_client import LivetimingSignalrcoreClient
+from api.domain.position_payload import compact_position_payload
 from api.services.live_timing_cache import LiveTimingCache
 from redis.exceptions import RedisError
 
-
 logger = logging.getLogger(__name__)
 CACHE_SNAPSHOT_TIMEOUT_SECONDS = 2
+POSITION_QUEUE_SIZE = 2000
 
 
 class LiveTopicStreamService:
@@ -104,3 +105,17 @@ class LiveTopicStreamService:
             await asyncio.gather(*pending, return_exceptions=True)
             for topic, queue in queues.items():
                 self.client.unsubscribe(topic, queue)
+
+    async def stream_position(self) -> AsyncGenerator[Any, None]:
+        queue = self.client.subscribe("Position.z", queue_size=POSITION_QUEUE_SIZE)
+        try:
+            await self.client.ensure_connected()
+            while True:
+                event = await queue.get()
+                compact = compact_position_payload(
+                    getattr(event, "raw_payload", event.payload)
+                )
+                if compact is not None:
+                    yield compact
+        finally:
+            self.client.unsubscribe("Position.z", queue)

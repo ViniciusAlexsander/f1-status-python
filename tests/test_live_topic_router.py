@@ -18,6 +18,7 @@ class LiveTopicRouterTest(unittest.IsolatedAsyncioTestCase):
                 "/live-timing/conditions",
                 "/live-timing/weather-data",
                 "/live-timing/race-control-messages",
+                "/live-timing/position",
             }.issubset(paths)
         )
 

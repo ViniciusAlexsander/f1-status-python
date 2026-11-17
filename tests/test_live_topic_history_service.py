@@ -158,6 +158,20 @@ class LiveTopicHistoryServiceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(snapshot["payload"]["Messages"], messages)
 
+    async def test_skips_compressed_position_history(self) -> None:
+        redis = FakeRedis()
+        service = LiveTopicHistoryService(FakeLiveTimingClient(), redis)
+        event_id = await service.save_event(
+            LiveTimingEvent(
+                topic="Position.z",
+                payload="compressed",
+                received_at=datetime(2026, 10, 30, tzinfo=timezone.utc),
+                raw_payload="compressed",
+            )
+        )
+        self.assertEqual(event_id, "")
+        self.assertEqual(redis.streams, [])
+
 
 if __name__ == "__main__":
     unittest.main()

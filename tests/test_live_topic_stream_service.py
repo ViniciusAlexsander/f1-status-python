@@ -17,8 +17,8 @@ class FakeLiveTimingClient:
     async def ensure_connected(self) -> None:
         self.connected = True
 
-    def subscribe(self, topic: str) -> asyncio.Queue:
-        queue = asyncio.Queue()
+    def subscribe(self, topic: str, queue_size: int | None = None) -> asyncio.Queue:
+        queue = asyncio.Queue(maxsize=queue_size or 0)
         self.queues[topic] = queue
         return queue
 
@@ -224,6 +224,53 @@ class LiveTopicStreamServiceTest(unittest.IsolatedAsyncioTestCase):
         second = await asyncio.wait_for(queue.get(), 1)
         self.assertEqual(first.payload, first_payload)
         self.assertEqual(second.payload, next_payload)
+
+    async def test_position_stream_yields_compact_last_sample(self) -> None:
+        import base64
+        import json
+        import zlib
+
+        payload = {
+            "Position": [
+                {
+                    "Timestamp": "2026-11-08T18:00:00.000Z",
+                    "Entries": {
+                        "16": {"Status": "OnTrack", "X": 10, "Y": 20, "Z": 1},
+                    },
+                },
+                {
+                    "Timestamp": "2026-11-08T18:00:00.220Z",
+                    "Entries": {
+                        "16": {"Status": "OnTrack", "X": 11, "Y": 21, "Z": 1},
+                        "1": {"Status": "OffTrack", "X": 5, "Y": 6, "Z": 0},
+                    },
+                },
+            ]
+        }
+        compressor = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+        raw = compressor.compress(json.dumps(payload).encode("utf-8")) + compressor.flush()
+        encoded = base64.b64encode(raw).decode("ascii")
+
+        client = FakeLiveTimingClient()
+        service = LiveTopicStreamService(client, FakeCache())
+        stream = service.stream_position()
+        next_item = asyncio.create_task(stream.__anext__())
+        await asyncio.sleep(0)
+        await client.queues["Position.z"].put(
+            SimpleNamespace(raw_payload=encoded, payload={})
+        )
+        self.assertEqual(
+            await asyncio.wait_for(next_item, 1),
+            {
+                "timestamp": "2026-11-08T18:00:00.220Z",
+                "cars": {
+                    "16": {"x": 11, "y": 21, "status": "OnTrack"},
+                    "1": {"x": 5, "y": 6, "status": "OffTrack"},
+                },
+            },
+        )
+        await stream.aclose()
+        self.assertEqual(client.unsubscribed, [("Position.z", client.queues["Position.z"])])
 
 
 if __name__ == "__main__":
